@@ -2,10 +2,10 @@
 <html lang="pt-BR" data-theme="light">
 <head>
   <meta charset="UTF-8" />
-  <title>Agenda Incubadora IFPR/PMP</title>
+  <title>Agenda Incubadora IFPR / PMP</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Firebase (compat) -->
+  <!-- Firebase (SDK compatível com firebase.*) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
@@ -18,9 +18,16 @@
 <body>
   <header class="topo">
     <div class="container topo__conteudo">
-      <div>
-        <h1>Agenda Incubadora IFPR / PMP</h1>
-        <p class="subtitulo">Controle de eventos, fotos e relatórios em PDF</p>
+      <div class="topo__branding">
+        <div class="topo__logos">
+          <img src="img/logo-ifpr.png" alt="IFPR" class="logo">
+          <img src="img/logo-pmp.png" alt="Prefeitura de Palmas" class="logo">
+          <img src="img/logo-incubadora.png" alt="Incubadora IFPR" class="logo">
+        </div>
+        <div class="topo__texto">
+          <h1>Agenda Incubadora IFPR / PMP</h1>
+          <p class="subtitulo">Controle de eventos, fotos e relatórios em PDF</p>
+        </div>
       </div>
       <button id="themeToggle" class="btn toggle-tema" type="button" aria-label="Alternar modo claro/escuro">
         🌙
@@ -178,6 +185,7 @@
     </div>
   </footer>
 
+  <!-- scripts -->
   <script src="firebase-config.js"></script>
   <script src="theme.js"></script>
   <script src="app.js"></script>

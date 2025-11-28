@@ -1,4 +1,4 @@
-// theme.js - modo claro/escuro simples usando data-theme no <html>
+// theme.js - modo claro/escuro usando data-theme no <html>
 
 document.addEventListener("DOMContentLoaded", () => {
   const root = document.documentElement;
