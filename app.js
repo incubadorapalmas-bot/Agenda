@@ -52,11 +52,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const img = new Image();
         img.onload = () => {
           let { width, height } = img;
-          const ratio = Math.min(
-            maxWidth / width,
-            maxHeight / height,
-            1
-          );
+          const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
           const targetWidth = Math.round(width * ratio);
           const targetHeight = Math.round(height * ratio);
 
@@ -121,6 +117,8 @@ document.addEventListener("DOMContentLoaded", () => {
     fotosInput.addEventListener("change", atualizarPreviewNovasFotos);
   }
 
+  // ========= Preview das novas fotos (AGORA COM IMAGEM) =========
+
   function atualizarPreviewNovasFotos() {
     if (!novasFotosPreview) return;
 
@@ -129,11 +127,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!files || !files.length) return;
 
     Array.from(files).forEach((file) => {
+      if (!file.type.startsWith("image/")) return;
+
       const card = document.createElement("div");
       card.className = "foto-thumb";
-      card.innerHTML = `
-        <span>${file.name}</span>
-      `;
+
+      const img = document.createElement("img");
+      img.className = "foto-thumb__img";
+      img.alt = file.name;
+      img.src = URL.createObjectURL(file);
+
+      const legend = document.createElement("span");
+      legend.textContent = file.name;
+
+      card.appendChild(img);
+      card.appendChild(legend);
       novasFotosPreview.appendChild(card);
     });
   }
@@ -178,7 +186,30 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("comentario").value = ev.comentario || "";
   }
 
-  // ========= Fotos de um evento (já salvas) =========
+  // ========= Buscar fotos de um evento (para PDF) =========
+
+  async function getFotosEvento(idEvento) {
+    const fotos = [];
+    try {
+      const snap = await db
+        .collection("eventos")
+        .doc(idEvento)
+        .collection("fotos")
+        .get();
+
+      snap.forEach((docFoto) => {
+        const { dataUrl, url, legenda } = docFoto.data();
+        const src = dataUrl || url || "";
+        if (!src) return;
+        fotos.push({ src, legenda: legenda || "" });
+      });
+    } catch (err) {
+      console.error("Erro ao buscar fotos do evento", err);
+    }
+    return fotos;
+  }
+
+  // ========= Fotos de um evento (já salvas) – MOSTRANDO IMAGEM =========
 
   async function carregarFotosDoEvento(idEvento) {
     fotosAtuaisDiv.innerHTML = "";
@@ -205,11 +236,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const card = document.createElement("div");
         card.className = "foto-thumb";
 
-        // se quiser, dá pra colocar a <img> aqui usando src
-        card.innerHTML = `
-          <span>${legenda || ""}</span>
-        `;
+        const img = document.createElement("img");
+        img.className = "foto-thumb__img";
+        img.alt = legenda || "Foto do evento";
+        img.src = src;
 
+        const caption = document.createElement("span");
+        caption.textContent = legenda || "";
+
+        card.appendChild(img);
+        card.appendChild(caption);
         fotosAtuaisDiv.appendChild(card);
       });
     } catch (err) {
@@ -412,23 +448,19 @@ document.addEventListener("DOMContentLoaded", () => {
       tabelaBody.appendChild(tr);
     });
 
-    document
-      .querySelectorAll(".btn-editar")
-      .forEach((btn) =>
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          abrirEdicaoEvento(btn.getAttribute("data-id"));
-        })
-      );
+    document.querySelectorAll(".btn-editar").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        abrirEdicaoEvento(btn.getAttribute("data-id"));
+      })
+    );
 
-    document
-      .querySelectorAll(".btn-pdf-evento")
-      .forEach((btn) =>
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          gerarPdfEventoComFotos(btn.getAttribute("data-id"));
-        })
-      );
+    document.querySelectorAll(".btn-pdf-evento").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        gerarPdfEventoComFotos(btn.getAttribute("data-id"));
+      })
+    );
   }
 
   // ========= Filtros =========
@@ -441,7 +473,7 @@ document.addEventListener("DOMContentLoaded", () => {
     carregarEventos();
   });
 
-  // ========= PDFs gerais (sem fotos) – ESTILO EMPRESARIAL =========
+  // ========= PDFs gerais (com fotos) – ESTILO EMPRESARIAL =========
 
   function obterDescricaoPeriodo() {
     if (!filtroDe.value && !filtroAte.value) {
@@ -484,13 +516,13 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.line(10, 38, 200, 38);
   }
 
-  // Relatório completo – visão gerencial
-  function gerarPdfCompleto() {
+  // ========= Relatório completo – visão gerencial (COM FOTOS + BORDAS) =========
+
+  async function gerarPdfCompleto() {
     const doc = new jsPDF("p", "mm", "a4");
 
     gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
 
-    // Cabeçalho da tabela
     let y = 44;
     const col = {
       idx: 10,
@@ -513,12 +545,27 @@ document.addEventListener("DOMContentLoaded", () => {
     y += 4;
     doc.setFont("helvetica", "normal");
 
-    eventosCache.forEach((ev, index) => {
+    for (let index = 0; index < eventosCache.length; index++) {
+      const ev = eventosCache[index];
+
       if (y > 270) {
         doc.addPage();
         gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
         y = 44;
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text("#", col.idx, y);
+        doc.text("Data", col.data, y);
+        doc.text("Tipo", col.tipo, y);
+        doc.text("Local", col.local, y);
+        doc.text("Participante", col.participante, y);
+        doc.text("Formato", col.formato, y);
+        y += 4;
+        doc.setFont("helvetica", "normal");
       }
+
+      const eventTop = y; // para borda
 
       const dataEv = ev.dataInicio || "";
       const tipoEv = ev.evento || "";
@@ -526,7 +573,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const partEv = ev.participante || "";
       const formatoEv = ev.formato || "";
 
-      // Linha principal
       doc.text(String(index + 1), col.idx, y);
       doc.text(dataEv, col.data, y);
 
@@ -551,10 +597,7 @@ document.addEventListener("DOMContentLoaded", () => {
           y += 4;
           if (y > 270) {
             doc.addPage();
-            gerarCabecalhoCorporativo(
-              doc,
-              "Relatório Gerencial de Eventos"
-            );
+            gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
             y = 44;
           }
         }
@@ -568,8 +611,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Bloco de detalhes (estilo relatório de empresa)
       const horarioStr =
-        (ev.horaInicio || "") +
-        (ev.horaFim ? " - " + ev.horaFim : "");
+        (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "");
       const dataFimStr =
         ev.dataFim && ev.dataFim !== ev.dataInicio
           ? ` até ${ev.dataFim}`
@@ -609,44 +651,111 @@ document.addEventListener("DOMContentLoaded", () => {
         y += 2;
       }
 
-      y += 1; // pequeno espaçamento entre eventos
-    });
+      // ====== FOTOS DO EVENTO NO RELATÓRIO COMPLETO ======
+      const fotos = await getFotosEvento(ev.id);
+      if (fotos.length) {
+        if (y > 270) {
+          doc.addPage();
+          gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
+          y = 44;
+        }
+
+        doc.setFontSize(8);
+        doc.text("Fotos:", 14, y);
+        y += 4;
+
+        const thumbWidth = 35;
+        const thumbHeight = 26;
+        let x = 14;
+        let count = 0;
+
+        for (const foto of fotos) {
+          if (y + thumbHeight > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Relatório Gerencial de Eventos"
+            );
+            y = 44;
+            x = 14;
+          }
+
+          try {
+            doc.addImage(foto.src, "JPEG", x, y, thumbWidth, thumbHeight);
+          } catch (err) {
+            console.warn("Erro ao adicionar imagem no PDF completo", err);
+          }
+
+          if (foto.legenda) {
+            doc.setFontSize(6);
+            const legLines = doc.splitTextToSize(
+              foto.legenda,
+              thumbWidth
+            );
+            doc.text(legLines, x, y + thumbHeight + 3);
+            doc.setFontSize(8);
+          }
+
+          x += thumbWidth + 4;
+          count++;
+
+          if (count % 4 === 0) {
+            x = 14;
+            y += thumbHeight + 10;
+          }
+        }
+
+        if (count % 4 !== 0) {
+          y += thumbHeight + 10;
+        }
+      }
+
+      const eventBottom = y;
+
+      // Borda em volta do bloco do evento
+      doc.setDrawColor(180);
+      doc.setLineWidth(0.3);
+      doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
+
+      y += 2; // espaçamento entre eventos
+    }
 
     doc.save("relatorio-gerencial-eventos-incubadora.pdf");
   }
 
-  // Relatório simplificado (visão operacional / Michelle)
-  function gerarPdfSimples() {
+  // ========= Relatório simplificado (COM FOTOS + BORDAS) =========
+
+  async function gerarPdfSimples() {
     const doc = new jsPDF("p", "mm", "a4");
 
     gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
 
     let y = 44;
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("#", 10, y);
-    doc.text("Data", 18, y);
-    doc.text("Evento / Local", 40, y);
-    doc.text("Comentário", 125, y);
+    const cabecalhoSimples = () => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("#", 10, y);
+      doc.text("Data", 18, y);
+      doc.text("Evento / Local", 40, y);
+      doc.text("Comentário", 125, y);
+      y += 4;
+      doc.setFont("helvetica", "normal");
+    };
 
-    y += 4;
-    doc.setFont("helvetica", "normal");
+    cabecalhoSimples();
 
-    eventosCache.forEach((ev, index) => {
+    for (let index = 0; index < eventosCache.length; index++) {
+      const ev = eventosCache[index];
+
       if (y > 275) {
         doc.addPage();
         gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
         y = 44;
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.text("#", 10, y);
-        doc.text("Data", 18, y);
-        doc.text("Evento / Local", 40, y);
-        doc.text("Comentário", 125, y);
-        y += 4;
-        doc.setFont("helvetica", "normal");
+        cabecalhoSimples();
       }
+
+      const eventTop = y;
 
       const dataEv = ev.dataInicio || "";
       const linhaEvento = `${ev.evento || ""}${
@@ -668,14 +777,7 @@ document.addEventListener("DOMContentLoaded", () => {
               "Agenda Simplificada – Michelle"
             );
             y = 44;
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9);
-            doc.text("#", 10, y);
-            doc.text("Data", 18, y);
-            doc.text("Evento / Local", 40, y);
-            doc.text("Comentário", 125, y);
-            y += 4;
-            doc.setFont("helvetica", "normal");
+            cabecalhoSimples();
           }
         }
 
@@ -688,29 +790,102 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       y += 5;
-    });
+
+      // ====== FOTOS DO EVENTO NO RELATÓRIO SIMPLIFICADO ======
+      const fotos = await getFotosEvento(ev.id);
+      if (fotos.length) {
+        if (y > 270) {
+          doc.addPage();
+          gerarCabecalhoCorporativo(
+            doc,
+            "Agenda Simplificada – Michelle"
+          );
+          y = 44;
+          cabecalhoSimples();
+        }
+
+        doc.setFontSize(8);
+        doc.text("Fotos:", 14, y);
+        y += 4;
+
+        const thumbWidth = 35;
+        const thumbHeight = 26;
+        let x = 14;
+        let count = 0;
+
+        for (const foto of fotos) {
+          if (y + thumbHeight > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Agenda Simplificada – Michelle"
+            );
+            y = 44;
+            cabecalhoSimples();
+            x = 14;
+          }
+
+          try {
+            doc.addImage(foto.src, "JPEG", x, y, thumbWidth, thumbHeight);
+          } catch (err) {
+            console.warn("Erro ao adicionar imagem no PDF simples", err);
+          }
+
+          if (foto.legenda) {
+            doc.setFontSize(6);
+            const legLines = doc.splitTextToSize(
+              foto.legenda,
+              thumbWidth
+            );
+            doc.text(legLines, x, y + thumbHeight + 3);
+            doc.setFontSize(8);
+          }
+
+          x += thumbWidth + 4;
+          count++;
+
+          if (count % 4 === 0) {
+            x = 14;
+            y += thumbHeight + 10;
+          }
+        }
+
+        if (count % 4 !== 0) {
+          y += thumbHeight + 10;
+        }
+      }
+
+      const eventBottom = y;
+
+      // Borda em volta do bloco do evento
+      doc.setDrawColor(180);
+      doc.setLineWidth(0.3);
+      doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
+
+      y += 3;
+    }
 
     doc.save("agenda-simplificada-michelle.pdf");
   }
 
-  // Botões de PDF (no cabeçalho)
-  btnPdfCompleto.addEventListener("click", () => {
+  // Botões de PDF (no cabeçalho) – agora chamando funções assíncronas
+  btnPdfCompleto.addEventListener("click", async () => {
     if (!eventosCache.length) {
       alert("Não há eventos carregados para gerar o PDF.");
       return;
     }
-    gerarPdfCompleto();
+    await gerarPdfCompleto();
   });
 
-  btnPdfSimples.addEventListener("click", () => {
+  btnPdfSimples.addEventListener("click", async () => {
     if (!eventosCache.length) {
       alert("Não há eventos carregados para gerar o PDF.");
       return;
     }
-    gerarPdfSimples();
+    await gerarPdfSimples();
   });
 
-  // ========= PDF por evento com fotos =========
+  // ========= PDF por evento com fotos (mantido) =========
 
   async function gerarPdfEventoComFotos(idEvento) {
     try {
@@ -743,8 +918,7 @@ document.addEventListener("DOMContentLoaded", () => {
             : ""
         }`,
         `Horário: ${
-          (ev.horaInicio || "") +
-          (ev.horaFim ? " - " + ev.horaFim : "")
+          (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
         }`,
         `Local: ${ev.local || ""}`,
         `Endereço: ${ev.endereco || ""}`,
@@ -782,7 +956,11 @@ document.addEventListener("DOMContentLoaded", () => {
           y = 10;
         }
 
-        doc.addImage(src, "JPEG", 10, y, 80, 60);
+        try {
+          doc.addImage(src, "JPEG", 10, y, 80, 60);
+        } catch (err) {
+          console.warn("Erro ao adicionar imagem no PDF de evento", err);
+        }
 
         if (legenda) {
           doc.setFontSize(9);
