@@ -1,6 +1,6 @@
 // app.js - Agenda Incubadora IFPR/PMP
 // Versão SEM Firebase Storage (fotos vão para o Firestore em base64, com compressão)
-// Agora com suporte a HEIC/HEIF via heic2any
+// Agora com suporte a HEIC/HEIF carregando heic2any dinamicamente
 
 document.addEventListener("DOMContentLoaded", () => {
   // ========= INICIALIZAÇÃO jsPDF (mais robusto) =========
@@ -20,6 +20,79 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
   const db = firebase.firestore();
+
+  // ========= CONSTANTE DO CDN DO HEIC2ANY =========
+  const HEIC2ANY_SRC =
+    "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js";
+
+  /**
+   * Garante que a função heic2any esteja disponível.
+   * - Se já estiver em window.__heic2anyFn, usa.
+   * - Se estiver em window.heic2any ou window.heic2any.default, usa.
+   * - Se não estiver, injeta o script do CDN e espera carregar.
+   */
+  function ensureHeic2any() {
+    // Já cacheado
+    if (
+      window.__heic2anyFn &&
+      typeof window.__heic2anyFn === "function"
+    ) {
+      return Promise.resolve(window.__heic2anyFn);
+    }
+
+    // Já existe global (por script no HTML)
+    if (window.heic2any) {
+      const g = window.heic2any;
+      const fn =
+        (typeof g === "function" && g) ||
+        (g && typeof g.default === "function" && g.default);
+      if (fn) {
+        window.__heic2anyFn = fn;
+        return Promise.resolve(fn);
+      }
+    }
+
+    // Já existe um carregamento em andamento
+    if (window.__heic2anyLoading) {
+      return window.__heic2anyLoading;
+    }
+
+    // Cria novo carregamento
+    window.__heic2anyLoading = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = HEIC2ANY_SRC;
+      script.async = true;
+
+      script.onload = () => {
+        const g = window.heic2any;
+        const fn =
+          (g && typeof g === "function" && g) ||
+          (g && typeof g.default === "function" && g.default);
+        if (!fn) {
+          reject(
+            new Error(
+              "Script heic2any carregado, mas função não encontrada."
+            )
+          );
+          return;
+        }
+        window.__heic2anyFn = fn;
+        resolve(fn);
+      };
+
+      script.onerror = () => {
+        reject(
+          new Error(
+            "Falha ao carregar script heic2any a partir do CDN."
+          )
+        );
+      };
+
+      document.head.appendChild(script);
+    });
+
+    return window.__heic2anyLoading;
+  }
 
   // ========= Referências de elementos =========
   const form = document.getElementById("eventoForm");
@@ -48,7 +121,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Toggle de tema
   const btnToggleTema =
     document.querySelector(".toggle-tema") ||
-    document.getElementById("toggleTema");
+    document.getElementById("btnToggleTema");
 
   let eventosCache = [];
   let eventoEmEdicaoId = null;
@@ -146,24 +219,17 @@ document.addEventListener("DOMContentLoaded", () => {
         reader.readAsDataURL(blob);
       };
 
-      // Se for HEIC/HEIF, converte antes com heic2any
+      // Se for HEIC/HEIF, garante lib e converte antes
       if (isHeicFile(file)) {
-        if (typeof heic2any !== "function") {
-          reject(
-            new Error(
-              "heic2any não encontrado. Verifique se o script heic2any foi incluído antes do app.js."
-            )
-          );
-          return;
-        }
-
-        heic2any({
-          blob: file,
-          toType: "image/jpeg",
-          quality: 0.9,
-        })
+        ensureHeic2any()
+          .then((fn) =>
+            fn({
+              blob: file,
+              toType: "image/jpeg",
+              quality: 0.9,
+            })
+          )
           .then((convertedBlob) => {
-            // Alguns browsers retornam um único Blob, outros podem retornar um array
             const blob =
               convertedBlob instanceof Blob
                 ? convertedBlob
@@ -178,10 +244,12 @@ document.addEventListener("DOMContentLoaded", () => {
               )
             );
           });
-      } else {
-        // JPG/PNG/etc: processa direto
-        processBlob(file);
+
+        return; // importante: não continuar aqui
       }
+
+      // JPG/PNG/etc: processa direto
+      processBlob(file);
     });
   }
 
@@ -245,7 +313,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const legend = document.createElement("span");
 
       if (isHeicFile(file)) {
-        // Não dá pra mostrar thumbnail HEIC no browser padrão
         const aviso = document.createElement("div");
         aviso.className = "foto-thumb__aviso";
         aviso.textContent = "HEIC – será convertido para JPG ao salvar";
@@ -389,7 +456,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const caption = document.createElement("span");
         caption.textContent = legenda || "";
 
-        // Botão de excluir foto
         const btnExcluir = document.createElement("button");
         btnExcluir.type = "button";
         btnExcluir.textContent = "Excluir";
@@ -540,8 +606,7 @@ document.addEventListener("DOMContentLoaded", () => {
               alert(
                 "Erro ao processar a imagem '" +
                   file.name +
-                  "'. " +
-                  "Se for HEIC, tente exportar para JPG/PNG no celular ou computador."
+                  "'. Se for HEIC, tente exportar para JPG/PNG no celular ou computador."
               );
             }
           }
@@ -644,7 +709,6 @@ document.addEventListener("DOMContentLoaded", () => {
         </td>
       `;
 
-      // Clique na linha inteira abre edição (menos nos botões)
       tr.addEventListener("click", (e) => {
         const isButton = e.target.closest("button");
         if (isButton) return;
@@ -654,7 +718,6 @@ document.addEventListener("DOMContentLoaded", () => {
       tabelaBody.appendChild(tr);
     });
 
-    // Botões "Editar / Fotos"
     document.querySelectorAll(".btn-editar").forEach((btn) =>
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -662,7 +725,6 @@ document.addEventListener("DOMContentLoaded", () => {
       })
     );
 
-    // Botões "PDF (evento)"
     document.querySelectorAll(".btn-pdf-evento").forEach((btn) =>
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -829,7 +891,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       y += 4;
 
-      // Bloco de detalhes
       const horarioStr =
         (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "");
       const dataFimStr =
@@ -871,7 +932,6 @@ document.addEventListener("DOMContentLoaded", () => {
         y += 2;
       }
 
-      // ====== FOTOS DO EVENTO NO RELATÓRIO COMPLETO ======
       const fotos = await getFotosEvento(ev.id);
       if (fotos.length) {
         if (y > 270) {
@@ -932,7 +992,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const eventBottom = y;
 
-      // Borda em volta do bloco do evento
       doc.setDrawColor(180);
       doc.setLineWidth(0.3);
       doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
@@ -1019,7 +1078,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       y += 5;
 
-      // ====== FOTOS DO EVENTO NO RELATÓRIO SIMPLIFICADO ======
       const fotos = await getFotosEvento(ev.id);
       if (fotos.length) {
         if (y > 270) {
@@ -1085,7 +1143,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const eventBottom = y;
 
-      // Borda em volta do bloco do evento
       doc.setDrawColor(180);
       doc.setLineWidth(0.3);
       doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
@@ -1096,7 +1153,6 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.save("agenda-simplificada-michelle.pdf");
   }
 
-  // Botões de PDF (no cabeçalho)
   if (btnPdfCompleto) {
     btnPdfCompleto.addEventListener("click", async () => {
       if (!eventosCache.length) {
