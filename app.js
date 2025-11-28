@@ -5,7 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const db = firebase.firestore();
   const { jsPDF } = window.jspdf;
 
-  // Referências de elementos
+  // ========= Referências de elementos =========
   const form = document.getElementById("eventoForm");
   const fotosInput = document.getElementById("fotos");
   const dropArea = document.getElementById("dropArea");
@@ -15,38 +15,48 @@ document.addEventListener("DOMContentLoaded", () => {
   const filtroAte = document.getElementById("filtroAte");
   const btnFiltrar = document.getElementById("btnFiltrar");
   const btnLimparFiltro = document.getElementById("btnLimparFiltro");
+
   const btnPdfCompleto = document.getElementById("btnPdfCompleto");
   const btnPdfSimples = document.getElementById("btnPdfSimples");
+
   const tabelaBody = document.querySelector("#tabelaEventos tbody");
 
   const campoEventoId = document.getElementById("eventoId");
   const formTituloModo = document.getElementById("formTituloModo");
   const btnSalvar = document.getElementById("btnSalvar");
   const btnCancelarEdicao = document.getElementById("btnCancelarEdicao");
+
   const fotosAtuaisWrapper = document.getElementById("fotosAtuaisWrapper");
   const fotosAtuaisDiv = document.getElementById("fotosAtuais");
 
   let eventosCache = [];
   let eventoEmEdicaoId = null;
 
-  // =========================
-  // Helpers: compressão de imagem
-  // =========================
+  // ========= Helpers: compressão de imagem =========
 
   /**
    * Converte um File de imagem em dataURL comprimido.
    * Reduz resolução e qualidade para caber no limite de 1MB/doc do Firestore.
    */
-  function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, quality = 0.6) {
+  function fileToCompressedDataUrl(
+    file,
+    maxWidth = 1280,
+    maxHeight = 720,
+    quality = 0.6
+  ) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onerror = () => reject(reader.error);
 
+      reader.onerror = () => reject(reader.error);
       reader.onload = () => {
         const img = new Image();
         img.onload = () => {
           let { width, height } = img;
-          const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+          const ratio = Math.min(
+            maxWidth / width,
+            maxHeight / height,
+            1
+          );
           const targetWidth = Math.round(width * ratio);
           const targetHeight = Math.round(height * ratio);
 
@@ -67,9 +77,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // =========================
-  // Drag & Drop de fotos
-  // =========================
+  // ========= Drag & Drop de fotos =========
+
   if (dropArea && fotosInput) {
     const preventDefaults = (e) => {
       e.preventDefault();
@@ -98,11 +107,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const dt = e.dataTransfer;
       const files = dt.files;
       const dataTransfer = new DataTransfer();
+
       Array.from(files).forEach((file) => {
         if (file.type.startsWith("image/")) {
           dataTransfer.items.add(file);
         }
       });
+
       fotosInput.files = dataTransfer.files;
       atualizarPreviewNovasFotos();
     });
@@ -112,25 +123,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function atualizarPreviewNovasFotos() {
     if (!novasFotosPreview) return;
+
     novasFotosPreview.innerHTML = "";
     const files = fotosInput.files;
     if (!files || !files.length) return;
 
     Array.from(files).forEach((file) => {
-      const url = URL.createObjectURL(file);
       const card = document.createElement("div");
       card.className = "foto-thumb";
       card.innerHTML = `
-        <img src="${url}" alt="${file.name}">
         <span>${file.name}</span>
       `;
       novasFotosPreview.appendChild(card);
     });
   }
 
-  // =========================
-  // Helpers de formulário
-  // =========================
+  // ========= Helpers de formulário =========
+
   function toggleFormDisabled(flag) {
     const elements = form.querySelectorAll("input, select, textarea, button");
     elements.forEach((el) => (el.disabled = flag));
@@ -140,9 +149,11 @@ document.addEventListener("DOMContentLoaded", () => {
     form.reset();
     campoEventoId.value = "";
     eventoEmEdicaoId = null;
+
     if (novasFotosPreview) novasFotosPreview.innerHTML = "";
-    fotosAtuaisDiv.innerHTML = "";
+    if (fotosAtuaisDiv) fotosAtuaisDiv.innerHTML = "";
     fotosAtuaisWrapper.classList.add("oculto");
+
     formTituloModo.textContent = "Cadastrar novo evento";
     btnSalvar.textContent = "Salvar evento";
     btnCancelarEdicao.classList.add("oculto");
@@ -157,7 +168,8 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("local").value = ev.local || "";
     document.getElementById("endereco").value = ev.endereco || "";
     document.getElementById("dataInicio").value = ev.dataInicio || "";
-    document.getElementById("dataFim").value = ev.dataFim || ev.dataInicio || "";
+    document.getElementById("dataFim").value =
+      ev.dataFim || ev.dataInicio || "";
     document.getElementById("horaInicio").value = ev.horaInicio || "";
     document.getElementById("horaFim").value = ev.horaFim || "";
     document.getElementById("formato").value = ev.formato || "Presencial";
@@ -166,8 +178,11 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("comentario").value = ev.comentario || "";
   }
 
+  // ========= Fotos de um evento (já salvas) =========
+
   async function carregarFotosDoEvento(idEvento) {
     fotosAtuaisDiv.innerHTML = "";
+
     try {
       const snap = await db
         .collection("eventos")
@@ -189,16 +204,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const card = document.createElement("div");
         card.className = "foto-thumb";
+
+        // se quiser, dá pra colocar a <img> aqui usando src
         card.innerHTML = `
-          <img src="${src}" alt="${legenda || ""}">
           <span>${legenda || ""}</span>
         `;
+
         fotosAtuaisDiv.appendChild(card);
       });
     } catch (err) {
       console.error("Erro ao carregar fotos do evento", err);
     }
   }
+
+  // ========= Abrir edição =========
 
   async function abrirEdicaoEvento(idEvento) {
     try {
@@ -216,12 +235,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
       eventoEmEdicaoId = idEvento;
       campoEventoId.value = idEvento;
+
       preencherFormularioComEvento(ev);
+
       formTituloModo.textContent = "Editando evento";
       btnSalvar.textContent = "Atualizar evento";
       btnCancelarEdicao.classList.remove("oculto");
 
       await carregarFotosDoEvento(idEvento);
+
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       console.error(err);
@@ -229,14 +251,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // =========================
-  // Salvar (criar ou atualizar) evento + fotos
-  // =========================
+  // ========= Salvar (criar/atualizar) evento + fotos =========
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const evento = document.getElementById("evento").value.trim();
-    if (!evento) {
+    const eventoTipo = document.getElementById("evento").value.trim();
+    if (!eventoTipo) {
       alert("Informe o tipo de evento.");
       return;
     }
@@ -246,7 +267,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const dataFim = dataFimInput || dataInicio;
 
     const docEvento = {
-      evento,
+      evento: eventoTipo,
       local: document.getElementById("local").value.trim(),
       endereco: document.getElementById("endereco").value.trim(),
       dataInicio,
@@ -257,13 +278,14 @@ document.addEventListener("DOMContentLoaded", () => {
       participante: document.getElementById("participante").value.trim(),
       pauta: document.getElementById("pauta").value.trim(),
       comentario: document.getElementById("comentario").value.trim(),
-      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
+      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
     };
 
     try {
       toggleFormDisabled(true);
 
       let idEvento;
+
       if (eventoEmEdicaoId) {
         idEvento = eventoEmEdicaoId;
         await db.collection("eventos").doc(idEvento).update(docEvento);
@@ -273,7 +295,7 @@ document.addEventListener("DOMContentLoaded", () => {
         idEvento = docRef.id;
       }
 
-      // Upload de novas fotos para o Firestore (sem Storage)
+      // Upload novas fotos em base64 para subcoleção "fotos"
       const files = fotosInput.files;
       for (let file of files) {
         if (!file.type.startsWith("image/")) continue;
@@ -286,7 +308,7 @@ document.addEventListener("DOMContentLoaded", () => {
           .add({
             dataUrl,
             legenda: file.name,
-            criadaEm: firebase.firestore.FieldValue.serverTimestamp()
+            criadaEm: firebase.firestore.FieldValue.serverTimestamp(),
           });
       }
 
@@ -295,22 +317,21 @@ document.addEventListener("DOMContentLoaded", () => {
           ? "Evento atualizado com sucesso!"
           : "Evento salvo com sucesso!"
       );
-
       limparFormulario();
       await carregarEventos();
     } catch (err) {
       console.error(err);
       alert(
-        "Erro ao salvar o evento ou as fotos. Se a imagem for muito pesada, tente tirar um print ou uma foto em resolução menor."
+        "Erro ao salvar o evento ou as fotos.\n" +
+          "Se a imagem for muito pesada, tente tirar um print ou uma foto em resolução menor."
       );
     } finally {
       toggleFormDisabled(false);
     }
   });
 
-  // =========================
-  // Carregar e listar eventos
-  // =========================
+  // ========= Carregar e listar eventos =========
+
   async function carregarEventos() {
     tabelaBody.innerHTML = "";
     eventosCache = [];
@@ -335,7 +356,7 @@ document.addEventListener("DOMContentLoaded", () => {
       renderTabela();
     } catch (err) {
       console.error(err);
-      alert("Erro ao carregar eventos. Verifique o console.");
+      alert("Erro ao carregar eventos.\nVerifique o console.");
     }
   }
 
@@ -372,16 +393,16 @@ document.addEventListener("DOMContentLoaded", () => {
         <td>${ev.pauta || ""}</td>
         <td>${ev.comentario || ""}</td>
         <td class="acao-col">
-          <button class="btn primario btn-editar" data-id="${ev.id}">
+          <button type="button" class="btn secundario btn-editar" data-id="${ev.id}">
             Editar / Fotos
           </button>
-          <button class="btn secundario btn-pdf-evento" data-id="${ev.id}">
+          <button type="button" class="btn primario btn-pdf-evento" data-id="${ev.id}">
             PDF
           </button>
         </td>
       `;
 
-      // Clique na linha inteira abre edição
+      // Clique na linha inteira abre edição (menos nos botões)
       tr.addEventListener("click", (e) => {
         const isButton = e.target.closest("button");
         if (isButton) return;
@@ -410,99 +431,269 @@ document.addEventListener("DOMContentLoaded", () => {
       );
   }
 
-  // =========================
-  // Filtros
-  // =========================
+  // ========= Filtros =========
+
   btnFiltrar.addEventListener("click", carregarEventos);
+
   btnLimparFiltro.addEventListener("click", () => {
     filtroDe.value = "";
     filtroAte.value = "";
     carregarEventos();
   });
 
-  // =========================
-  // PDFs gerais (sem fotos)
-  // =========================
+  // ========= PDFs gerais (sem fotos) – ESTILO EMPRESARIAL =========
+
+  function obterDescricaoPeriodo() {
+    if (!filtroDe.value && !filtroAte.value) {
+      return "Todos os eventos cadastrados";
+    }
+
+    const de = filtroDe.value || "início";
+    const ate = filtroAte.value || "data atual";
+    return `Período: ${de} até ${ate}`;
+  }
+
+  function gerarCabecalhoCorporativo(doc, titulo) {
+    const hoje = new Date();
+    const dataStr = hoje.toLocaleDateString("pt-BR");
+    const horaStr = hoje.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.text("INSTITUTO FEDERAL DO PARANÁ - CAMPUS PALMAS", 10, 12);
+
+    doc.setFontSize(11);
+    doc.text(
+      "Incubadora IFPR / Prefeitura Municipal de Palmas",
+      10,
+      18
+    );
+
+    doc.setFontSize(10);
+    doc.text(titulo, 10, 24);
+
+    doc.setFont("helvetica", "normal");
+    doc.text(`Emitido em: ${dataStr} às ${horaStr}`, 10, 30);
+    doc.text(obterDescricaoPeriodo(), 10, 35);
+
+    doc.setDrawColor(0, 143, 76);
+    doc.setLineWidth(0.4);
+    doc.line(10, 38, 200, 38);
+  }
+
+  // Relatório completo – visão gerencial
   function gerarPdfCompleto() {
     const doc = new jsPDF("p", "mm", "a4");
-    doc.setFontSize(14);
-    doc.text("Relatório Completo - Agenda Incubadora IFPR/PMP", 10, 10);
 
+    gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
+
+    // Cabeçalho da tabela
+    let y = 44;
+    const col = {
+      idx: 10,
+      data: 18,
+      tipo: 35,
+      local: 80,
+      participante: 130,
+      formato: 180,
+    };
+
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    let y = 18;
+    doc.text("#", col.idx, y);
+    doc.text("Data", col.data, y);
+    doc.text("Tipo", col.tipo, y);
+    doc.text("Local", col.local, y);
+    doc.text("Participante", col.participante, y);
+    doc.text("Formato", col.formato, y);
+
+    y += 4;
+    doc.setFont("helvetica", "normal");
+
+    eventosCache.forEach((ev, index) => {
+      if (y > 270) {
+        doc.addPage();
+        gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
+        y = 44;
+      }
+
+      const dataEv = ev.dataInicio || "";
+      const tipoEv = ev.evento || "";
+      const localEv = ev.local || "";
+      const partEv = ev.participante || "";
+      const formatoEv = ev.formato || "";
+
+      // Linha principal
+      doc.text(String(index + 1), col.idx, y);
+      doc.text(dataEv, col.data, y);
+
+      const tipoLines = doc.splitTextToSize(tipoEv, col.local - col.tipo - 2);
+      const localLines = doc.splitTextToSize(
+        localEv,
+        col.participante - col.local - 2
+      );
+      const partLines = doc.splitTextToSize(
+        partEv,
+        col.formato - col.participante - 2
+      );
+
+      const maxLines = Math.max(
+        tipoLines.length,
+        localLines.length,
+        partLines.length
+      );
+
+      for (let i = 0; i < maxLines; i++) {
+        if (i > 0) {
+          y += 4;
+          if (y > 270) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Relatório Gerencial de Eventos"
+            );
+            y = 44;
+          }
+        }
+        if (tipoLines[i]) doc.text(tipoLines[i], col.tipo, y);
+        if (localLines[i]) doc.text(localLines[i], col.local, y);
+        if (partLines[i]) doc.text(partLines[i], col.participante, y);
+        if (i === 0 && formatoEv) doc.text(formatoEv, col.formato, y);
+      }
+
+      y += 4;
+
+      // Bloco de detalhes (estilo relatório de empresa)
+      const horarioStr =
+        (ev.horaInicio || "") +
+        (ev.horaFim ? " - " + ev.horaFim : "");
+      const dataFimStr =
+        ev.dataFim && ev.dataFim !== ev.dataInicio
+          ? ` até ${ev.dataFim}`
+          : "";
+      const enderecoStr = ev.endereco || "";
+      const pautaStr = ev.pauta || "";
+      const comentarioStr = ev.comentario || "";
+
+      const detalhes = [];
+
+      if (ev.dataInicio) {
+        detalhes.push(`Período: ${ev.dataInicio}${dataFimStr}`);
+      }
+      if (horarioStr.trim()) detalhes.push(`Horário: ${horarioStr}`);
+      if (enderecoStr) detalhes.push(`Endereço: ${enderecoStr}`);
+      if (pautaStr) detalhes.push(`Pauta: ${pautaStr}`);
+      if (comentarioStr) detalhes.push(`Comentário: ${comentarioStr}`);
+
+      if (detalhes.length) {
+        const bloco = doc.splitTextToSize(detalhes.join(" | "), 180);
+        doc.setFontSize(8);
+
+        bloco.forEach((linha) => {
+          if (y > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Relatório Gerencial de Eventos"
+            );
+            y = 44;
+          }
+          doc.text(linha, 14, y);
+          y += 3;
+        });
+
+        doc.setFontSize(9);
+        y += 2;
+      }
+
+      y += 1; // pequeno espaçamento entre eventos
+    });
+
+    doc.save("relatorio-gerencial-eventos-incubadora.pdf");
+  }
+
+  // Relatório simplificado (visão operacional / Michelle)
+  function gerarPdfSimples() {
+    const doc = new jsPDF("p", "mm", "a4");
+
+    gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
+
+    let y = 44;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("#", 10, y);
+    doc.text("Data", 18, y);
+    doc.text("Evento / Local", 40, y);
+    doc.text("Comentário", 125, y);
+
+    y += 4;
+    doc.setFont("helvetica", "normal");
 
     eventosCache.forEach((ev, index) => {
       if (y > 275) {
         doc.addPage();
-        y = 10;
-      }
-
-      const linha1 = `${index + 1}. ${ev.dataInicio || ""}  |  ${
-        ev.evento || ""
-      }  |  ${ev.local || ""}`;
-      const linha2 = `Horário: ${
-        (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
-      }  |  Formato: ${ev.formato || ""}`;
-      const linha3 = `Participante: ${ev.participante || ""}`;
-      const linha4 = `Pauta: ${ev.pauta || ""}`;
-      const linha5 = `Comentário: ${ev.comentario || ""}`;
-
-      doc.text(linha1, 10, y);
-      y += 4;
-      doc.text(linha2, 10, y);
-      y += 4;
-      if (ev.participante) {
-        doc.text(linha3, 10, y);
+        gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
+        y = 44;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text("#", 10, y);
+        doc.text("Data", 18, y);
+        doc.text("Evento / Local", 40, y);
+        doc.text("Comentário", 125, y);
         y += 4;
-      }
-      if (ev.pauta) {
-        doc.text(linha4, 10, y);
-        y += 4;
-      }
-      if (ev.comentario) {
-        const textLines = doc.splitTextToSize(linha5, 190);
-        doc.text(textLines, 10, y);
-        y += textLines.length * 4;
-      }
-      y += 3;
-    });
-
-    doc.save("relatorio-completo-agenda-incubadora.pdf");
-  }
-
-  function gerarPdfSimples() {
-    const doc = new jsPDF("p", "mm", "a4");
-    doc.setFontSize(14);
-    doc.text("Agenda Simplificada - Michelle", 10, 10);
-
-    doc.setFontSize(9);
-    let y = 18;
-
-    eventosCache.forEach((ev, index) => {
-      if (y > 280) {
-        doc.addPage();
-        y = 10;
+        doc.setFont("helvetica", "normal");
       }
 
-      const linha = `${index + 1}. ${ev.dataInicio || ""}  |  ${
-        ev.evento || ""
-      }  |  ${ev.local || ""}`;
-      doc.text(linha, 10, y);
-      y += 4;
+      const dataEv = ev.dataInicio || "";
+      const linhaEvento = `${ev.evento || ""}${
+        ev.local ? " - " + ev.local : ""
+      }`;
+      const comentario = ev.comentario || "";
 
-      if (ev.comentario) {
-        const linhaComent = `Comentário: ${ev.comentario}`;
-        const textLines = doc.splitTextToSize(linhaComent, 190);
-        doc.text(textLines, 10, y);
-        y += textLines.length * 4;
+      const eventoLines = doc.splitTextToSize(linhaEvento, 80);
+      const comentLines = doc.splitTextToSize(comentario, 75);
+      const maxLines = Math.max(eventoLines.length, comentLines.length);
+
+      for (let i = 0; i < maxLines; i++) {
+        if (i > 0) {
+          y += 4;
+          if (y > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Agenda Simplificada – Michelle"
+            );
+            y = 44;
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.text("#", 10, y);
+            doc.text("Data", 18, y);
+            doc.text("Evento / Local", 40, y);
+            doc.text("Comentário", 125, y);
+            y += 4;
+            doc.setFont("helvetica", "normal");
+          }
+        }
+
+        if (i === 0) {
+          doc.text(String(index + 1), 10, y);
+          doc.text(dataEv, 18, y);
+        }
+        if (eventoLines[i]) doc.text(eventoLines[i], 40, y);
+        if (comentLines[i]) doc.text(comentLines[i], 125, y);
       }
 
-      y += 3;
+      y += 5;
     });
 
     doc.save("agenda-simplificada-michelle.pdf");
   }
 
+  // Botões de PDF (no cabeçalho)
   btnPdfCompleto.addEventListener("click", () => {
     if (!eventosCache.length) {
       alert("Não há eventos carregados para gerar o PDF.");
@@ -519,9 +710,8 @@ document.addEventListener("DOMContentLoaded", () => {
     gerarPdfSimples();
   });
 
-  // =========================
-  // PDF por evento com fotos (do Firestore)
-  // =========================
+  // ========= PDF por evento com fotos =========
+
   async function gerarPdfEventoComFotos(idEvento) {
     try {
       const docRef = await db.collection("eventos").doc(idEvento).get();
@@ -529,8 +719,8 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Evento não encontrado.");
         return;
       }
-      const ev = docRef.data();
 
+      const ev = docRef.data();
       const fotosSnap = await db
         .collection("eventos")
         .doc(idEvento)
@@ -538,6 +728,7 @@ document.addEventListener("DOMContentLoaded", () => {
         .get();
 
       const doc = new jsPDF("p", "mm", "a4");
+
       doc.setFontSize(14);
       doc.text("Relatório do Evento", 10, 10);
 
@@ -546,17 +737,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const infos = [
         `Evento: ${ev.evento || ""}`,
-        `Data: ${ev.dataInicio || ""} ${
-          ev.dataFim && ev.dataFim !== ev.dataInicio ? " até " + ev.dataFim : ""
+        `Data: ${ev.dataInicio || ""}${
+          ev.dataFim && ev.dataFim !== ev.dataInicio
+            ? " até " + ev.dataFim
+            : ""
         }`,
         `Horário: ${
-          (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
+          (ev.horaInicio || "") +
+          (ev.horaFim ? " - " + ev.horaFim : "")
         }`,
         `Local: ${ev.local || ""}`,
         `Endereço: ${ev.endereco || ""}`,
-        ev.participante ? `Participante/responsável: ${ev.participante}` : "",
+        ev.participante
+          ? `Participante/responsável: ${ev.participante}`
+          : "",
         ev.pauta ? `Pauta: ${ev.pauta}` : "",
-        ev.comentario ? `Comentário: ${ev.comentario}` : ""
+        ev.comentario ? `Comentário: ${ev.comentario}` : "",
       ].filter(Boolean);
 
       infos.forEach((linha) => {
@@ -587,10 +783,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         doc.addImage(src, "JPEG", 10, y, 80, 60);
+
         if (legenda) {
           doc.setFontSize(9);
           doc.text(doc.splitTextToSize(legenda, 80), 10, y + 63);
         }
+
         y += 70;
       }
 
@@ -600,15 +798,15 @@ document.addEventListener("DOMContentLoaded", () => {
         "-" +
         (ev.evento || "sem-nome") +
         ".pdf";
+
       doc.save(nomeArquivo.replace(/\s+/g, "-"));
     } catch (err) {
       console.error(err);
-      alert("Erro ao gerar PDF do evento. Verifique o console.");
+      alert("Erro ao gerar PDF do evento.\nVerifique o console.");
     }
   }
 
-  // =========================
-  // Inicialização
-  // =========================
+  // ========= Inicialização =========
+
   carregarEventos();
 });
