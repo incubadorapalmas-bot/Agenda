@@ -30,8 +30,10 @@
 
   <main class="container principal">
     <section id="form-section" class="card">
-      <h2>Cadastro de evento</h2>
+      <h2><span id="formTituloModo">Cadastrar novo evento</span></h2>
       <form id="eventoForm" autocomplete="off">
+        <input type="hidden" id="eventoId" />
+
         <div class="linha">
           <div class="campo">
             <label for="evento">Tipo de evento</label>
@@ -101,21 +103,33 @@
         </div>
 
         <div class="campo">
-          <label for="fotos">Fotos do evento (pode selecionar várias)</label>
-          <input id="fotos" type="file" accept="image/*" multiple />
+          <label>Fotos do evento</label>
+          <div id="dropArea" class="drop-area">
+            <p>Arraste e solte as fotos aqui ou <span class="drop-area__link">clique para selecionar</span></p>
+            <input id="fotos" type="file" accept="image/*" multiple hidden />
+          </div>
           <small>As fotos serão enviadas para o Firebase Storage e vinculadas ao evento.</small>
+          <div id="novasFotosPreview" class="fotos-grid novas-fotos"></div>
+        </div>
+
+        <div id="fotosAtuaisWrapper" class="fotos-atuais oculto">
+          <p class="fotos-atuais__titulo">Fotos já cadastradas para este evento:</p>
+          <div id="fotosAtuais" class="fotos-grid"></div>
         </div>
 
         <div class="botoes-form">
-          <button type="submit" class="btn primario">Salvar evento</button>
-          <button type="reset" class="btn">Limpar</button>
+          <button type="submit" class="btn primario" id="btnSalvar">Salvar evento</button>
+          <button type="button" class="btn secundario oculto" id="btnCancelarEdicao">Cancelar edição</button>
         </div>
       </form>
     </section>
 
     <section id="lista-section" class="card">
       <div class="cabecalho-lista">
-        <h2>Eventos cadastrados</h2>
+        <div>
+          <h2>Eventos cadastrados</h2>
+          <p class="subtexto">Clique em uma linha ou em “Editar / Fotos” para alterar o relatório do evento.</p>
+        </div>
         <div class="filtros">
           <label>De:
             <input type="date" id="filtroDe">
@@ -124,7 +138,7 @@
             <input type="date" id="filtroAte">
           </label>
           <button id="btnFiltrar" class="btn">Filtrar</button>
-          <button id="btnLimparFiltro" class="btn secundario">Limpar filtros</button>
+          <button id="btnLimparFiltro" class="btn secundario">Limpar</button>
         </div>
       </div>
 
@@ -141,11 +155,11 @@
               <th>Participante</th>
               <th>Pauta</th>
               <th>Comentário</th>
-              <th>Ações</th>
+              <th style="width: 170px;">Ações</th>
             </tr>
           </thead>
           <tbody>
-            <!-- linhas geradas via JS -->
+            <!-- linhas via JS -->
           </tbody>
         </table>
       </div>
@@ -164,11 +178,8 @@
     </div>
   </footer>
 
-  <!-- Configuração do Firebase (preencha firebase-config.js) -->
   <script src="firebase-config.js"></script>
-  <!-- Lógica da aplicação -->
-  <script src="app.js"></script>
-  <!-- Tema -->
   <script src="theme.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

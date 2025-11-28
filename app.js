@@ -1,6 +1,5 @@
 // app.js - lógica da Agenda Incubadora IFPR/PMP
 
-// Espera o DOM carregar
 document.addEventListener("DOMContentLoaded", () => {
   const db = firebase.firestore();
   const storage = firebase.storage();
@@ -9,6 +8,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Referências de elementos
   const form = document.getElementById("eventoForm");
   const fotosInput = document.getElementById("fotos");
+  const dropArea = document.getElementById("dropArea");
+  const novasFotosPreview = document.getElementById("novasFotosPreview");
+
   const filtroDe = document.getElementById("filtroDe");
   const filtroAte = document.getElementById("filtroAte");
   const btnFiltrar = document.getElementById("btnFiltrar");
@@ -17,10 +19,172 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnPdfSimples = document.getElementById("btnPdfSimples");
   const tabelaBody = document.querySelector("#tabelaEventos tbody");
 
-  // Cache local dos eventos carregados (para PDFs)
-  let eventosCache = [];
+  const campoEventoId = document.getElementById("eventoId");
+  const formTituloModo = document.getElementById("formTituloModo");
+  const btnSalvar = document.getElementById("btnSalvar");
+  const btnCancelarEdicao = document.getElementById("btnCancelarEdicao");
+  const fotosAtuaisWrapper = document.getElementById("fotosAtuaisWrapper");
+  const fotosAtuaisDiv = document.getElementById("fotosAtuais");
 
-  // ---------- Função: salvar evento ----------
+  let eventosCache = [];
+  let eventoEmEdicaoId = null;
+
+  // ----------- Drag & Drop de fotos -----------
+  if (dropArea && fotosInput) {
+    const preventDefaults = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
+      dropArea.addEventListener(eventName, preventDefaults, false);
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      dropArea.addEventListener(eventName, () => {
+        dropArea.classList.add("dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      dropArea.addEventListener(eventName, () => {
+        dropArea.classList.remove("dragover");
+      });
+    });
+
+    dropArea.addEventListener("click", () => fotosInput.click());
+
+    dropArea.addEventListener("drop", (e) => {
+      const dt = e.dataTransfer;
+      const files = dt.files;
+      const dataTransfer = new DataTransfer();
+      Array.from(files).forEach((file) => {
+        if (file.type.startsWith("image/")) {
+          dataTransfer.items.add(file);
+        }
+      });
+      fotosInput.files = dataTransfer.files;
+      atualizarPreviewNovasFotos();
+    });
+
+    fotosInput.addEventListener("change", atualizarPreviewNovasFotos);
+  }
+
+  function atualizarPreviewNovasFotos() {
+    if (!novasFotosPreview) return;
+    novasFotosPreview.innerHTML = "";
+    const files = fotosInput.files;
+    if (!files || !files.length) return;
+
+    Array.from(files).forEach((file) => {
+      const url = URL.createObjectURL(file);
+      const card = document.createElement("div");
+      card.className = "foto-thumb";
+      card.innerHTML = `
+        <img src="${url}" alt="${file.name}">
+        <span>${file.name}</span>
+      `;
+      novasFotosPreview.appendChild(card);
+    });
+  }
+
+  // ----------- Helpers de formulário -----------
+  function toggleFormDisabled(flag) {
+    const elements = form.querySelectorAll("input, select, textarea, button");
+    elements.forEach((el) => (el.disabled = flag));
+  }
+
+  function limparFormulario() {
+    form.reset();
+    campoEventoId.value = "";
+    eventoEmEdicaoId = null;
+    if (novasFotosPreview) novasFotosPreview.innerHTML = "";
+    fotosAtuaisDiv.innerHTML = "";
+    fotosAtuaisWrapper.classList.add("oculto");
+    formTituloModo.textContent = "Cadastrar novo evento";
+    btnSalvar.textContent = "Salvar evento";
+    btnCancelarEdicao.classList.add("oculto");
+  }
+
+  btnCancelarEdicao.addEventListener("click", () => {
+    limparFormulario();
+  });
+
+  function preencherFormularioComEvento(ev) {
+    document.getElementById("evento").value = ev.evento || "";
+    document.getElementById("local").value = ev.local || "";
+    document.getElementById("endereco").value = ev.endereco || "";
+    document.getElementById("dataInicio").value = ev.dataInicio || "";
+    document.getElementById("dataFim").value = ev.dataFim || ev.dataInicio || "";
+    document.getElementById("horaInicio").value = ev.horaInicio || "";
+    document.getElementById("horaFim").value = ev.horaFim || "";
+    document.getElementById("formato").value = ev.formato || "Presencial";
+    document.getElementById("participante").value = ev.participante || "";
+    document.getElementById("pauta").value = ev.pauta || "";
+    document.getElementById("comentario").value = ev.comentario || "";
+  }
+
+  async function carregarFotosDoEvento(idEvento) {
+    fotosAtuaisDiv.innerHTML = "";
+    try {
+      const snap = await db
+        .collection("eventos")
+        .doc(idEvento)
+        .collection("fotos")
+        .get();
+
+      if (snap.empty) {
+        fotosAtuaisWrapper.classList.add("oculto");
+        return;
+      }
+
+      fotosAtuaisWrapper.classList.remove("oculto");
+
+      snap.forEach((docFoto) => {
+        const { url, legenda } = docFoto.data();
+        const card = document.createElement("div");
+        card.className = "foto-thumb";
+        card.innerHTML = `
+          <img src="${url}" alt="${legenda || ""}">
+          <span>${legenda || ""}</span>
+        `;
+        fotosAtuaisDiv.appendChild(card);
+      });
+    } catch (err) {
+      console.error("Erro ao carregar fotos do evento", err);
+    }
+  }
+
+  async function abrirEdicaoEvento(idEvento) {
+    try {
+      const evCache = eventosCache.find((e) => e.id === idEvento);
+      let ev = evCache;
+
+      if (!ev) {
+        const doc = await db.collection("eventos").doc(idEvento).get();
+        if (!doc.exists) {
+          alert("Evento não encontrado.");
+          return;
+        }
+        ev = { id: doc.id, ...doc.data() };
+      }
+
+      eventoEmEdicaoId = idEvento;
+      campoEventoId.value = idEvento;
+      preencherFormularioComEvento(ev);
+      formTituloModo.textContent = "Editando evento";
+      btnSalvar.textContent = "Atualizar evento";
+      btnCancelarEdicao.classList.remove("oculto");
+
+      await carregarFotosDoEvento(idEvento);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao carregar dados do evento para edição.");
+    }
+  }
+
+  // ----------- Salvar (criar ou atualizar) evento -----------
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -46,27 +210,32 @@ document.addEventListener("DOMContentLoaded", () => {
       participante: document.getElementById("participante").value.trim(),
       pauta: document.getElementById("pauta").value.trim(),
       comentario: document.getElementById("comentario").value.trim(),
-      criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
       atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
     };
 
     try {
-      // Desabilita botões enquanto grava
       toggleFormDisabled(true);
 
-      // Cria o documento do evento
-      const docRef = await db.collection("eventos").add(docEvento);
+      let idEvento;
+      if (eventoEmEdicaoId) {
+        idEvento = eventoEmEdicaoId;
+        await db.collection("eventos").doc(idEvento).update(docEvento);
+      } else {
+        docEvento.criadoEm = firebase.firestore.FieldValue.serverTimestamp();
+        const docRef = await db.collection("eventos").add(docEvento);
+        idEvento = docRef.id;
+      }
 
-      // Upload das fotos (se houver)
+      // Upload de novas fotos (não remove as antigas)
       const files = fotosInput.files;
       for (let file of files) {
-        const storageRef = storage.ref(`eventos/${docRef.id}/${file.name}`);
+        const storageRef = storage.ref(`eventos/${idEvento}/${file.name}`);
         const snapshot = await storageRef.put(file);
         const url = await snapshot.ref.getDownloadURL();
 
         await db
           .collection("eventos")
-          .doc(docRef.id)
+          .doc(idEvento)
           .collection("fotos")
           .add({
             url,
@@ -75,9 +244,14 @@ document.addEventListener("DOMContentLoaded", () => {
           });
       }
 
-      alert("Evento salvo com sucesso!");
-      form.reset();
-      await carregarEventos(); // atualiza tabela
+      alert(
+        eventoEmEdicaoId
+          ? "Evento atualizado com sucesso!"
+          : "Evento salvo com sucesso!"
+      );
+
+      limparFormulario();
+      await carregarEventos();
     } catch (err) {
       console.error(err);
       alert("Erro ao salvar o evento. Verifique o console.");
@@ -86,12 +260,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  function toggleFormDisabled(flag) {
-    const elements = form.querySelectorAll("input, select, textarea, button");
-    elements.forEach((el) => (el.disabled = flag));
-  }
-
-  // ---------- Função: carregar eventos ----------
+  // ----------- Carregar e listar eventos -----------
   async function carregarEventos() {
     tabelaBody.innerHTML = "";
     eventosCache = [];
@@ -102,13 +271,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const de = filtroDe.value;
       const ate = filtroAte.value;
 
-      // Filtros simples por data
-      if (de) {
-        query = query.where("dataInicio", ">=", de);
-      }
-      if (ate) {
-        query = query.where("dataInicio", "<=", ate);
-      }
+      if (de) query = query.where("dataInicio", ">=", de);
+      if (ate) query = query.where("dataInicio", "<=", ate);
 
       const snap = await query.get();
 
@@ -125,7 +289,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // ---------- Função: desenhar tabela ----------
   function renderTabela() {
     tabelaBody.innerHTML = "";
 
@@ -141,6 +304,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     eventosCache.forEach((ev) => {
       const tr = document.createElement("tr");
+      tr.dataset.id = ev.id;
 
       const horario =
         (ev.horaInicio || "") +
@@ -158,50 +322,53 @@ document.addEventListener("DOMContentLoaded", () => {
         <td>${ev.pauta || ""}</td>
         <td>${ev.comentario || ""}</td>
         <td class="acao-col">
+          <button class="btn primario btn-editar" data-id="${ev.id}">
+            Editar / Fotos
+          </button>
           <button class="btn secundario btn-pdf-evento" data-id="${ev.id}">
-            PDF + fotos
+            PDF
           </button>
         </td>
       `;
 
+      // Clique na linha inteira também abre edição
+      tr.addEventListener("click", (e) => {
+        const isButton = e.target.closest("button");
+        if (isButton) return; // já tem handler específico
+        abrirEdicaoEvento(ev.id);
+      });
+
       tabelaBody.appendChild(tr);
     });
 
-    // Liga eventos dos botões de PDF por evento
+    document
+      .querySelectorAll(".btn-editar")
+      .forEach((btn) =>
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          abrirEdicaoEvento(btn.getAttribute("data-id"));
+        })
+      );
+
     document
       .querySelectorAll(".btn-pdf-evento")
       .forEach((btn) =>
-        btn.addEventListener("click", () =>
-          gerarPdfEventoComFotos(btn.getAttribute("data-id"))
-        )
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          gerarPdfEventoComFotos(btn.getAttribute("data-id"));
+        })
       );
   }
 
-  // ---------- Filtros ----------
+  // ----------- Filtros -----------
   btnFiltrar.addEventListener("click", carregarEventos);
-
   btnLimparFiltro.addEventListener("click", () => {
     filtroDe.value = "";
     filtroAte.value = "";
     carregarEventos();
   });
 
-  // ---------- PDFs gerais ----------
-  btnPdfCompleto.addEventListener("click", () => {
-    if (!eventosCache.length) {
-      alert("Não há eventos carregados para gerar o PDF.");
-      return;
-    }
-    gerarPdfCompleto();
-  });
-
-  btnPdfSimples.addEventListener("click", () => {
-    if (!eventosCache.length) {
-      alert("Não há eventos carregados para gerar o PDF.");
-      return;
-    }
-    gerarPdfSimples();
-  });
+  // ----------- PDFs gerais -----------
 
   function gerarPdfCompleto() {
     const doc = new jsPDF("p", "mm", "a4");
@@ -220,7 +387,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const linha1 = `${index + 1}. ${ev.dataInicio || ""}  |  ${
         ev.evento || ""
       }  |  ${ev.local || ""}`;
-      const linha2 = `Horário: ${(ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
+      const linha2 = `Horário: ${
+        (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
       }  |  Formato: ${ev.formato || ""}`;
       const linha3 = `Participante: ${ev.participante || ""}`;
       const linha4 = `Pauta: ${ev.pauta || ""}`;
@@ -282,7 +450,24 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.save("agenda-simplificada-michelle.pdf");
   }
 
-  // ---------- PDF por evento com fotos ----------
+  btnPdfCompleto.addEventListener("click", () => {
+    if (!eventosCache.length) {
+      alert("Não há eventos carregados para gerar o PDF.");
+      return;
+    }
+    gerarPdfCompleto();
+  });
+
+  btnPdfSimples.addEventListener("click", () => {
+    if (!eventosCache.length) {
+      alert("Não há eventos carregados para gerar o PDF.");
+      return;
+    }
+    gerarPdfSimples();
+  });
+
+  // ----------- PDF por evento com fotos -----------
+
   async function gerarPdfEventoComFotos(idEvento) {
     try {
       const docRef = await db.collection("eventos").doc(idEvento).get();
@@ -310,7 +495,8 @@ document.addEventListener("DOMContentLoaded", () => {
         `Data: ${ev.dataInicio || ""} ${
           ev.dataFim && ev.dataFim !== ev.dataInicio ? " até " + ev.dataFim : ""
         }`,
-        `Horário: ${(ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
+        `Horário: ${
+          (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
         }`,
         `Local: ${ev.local || ""}`,
         `Endereço: ${ev.endereco || ""}`,
@@ -340,13 +526,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const { url, legenda } = fotoDoc.data();
         const dataUrl = await urlToDataUrl(url);
 
-        // Se passar do limite da página, cria outra
         if (y > 200) {
           doc.addPage();
           y = 10;
         }
 
-        // Adiciona imagem (80mm largura, altura proporcional aproximada)
         doc.addImage(dataUrl, "JPEG", 10, y, 80, 60);
         if (legenda) {
           doc.setFontSize(9);
@@ -368,7 +552,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Converte URL de imagem em DataURL (base64) para o jsPDF
   async function urlToDataUrl(url) {
     const response = await fetch(url);
     const blob = await response.blob();
@@ -381,6 +564,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Carrega os eventos na primeira vez
+  // ----------- Inicialização -----------
   carregarEventos();
 });
