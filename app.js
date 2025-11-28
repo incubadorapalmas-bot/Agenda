@@ -53,6 +53,19 @@ document.addEventListener("DOMContentLoaded", () => {
   let eventosCache = [];
   let eventoEmEdicaoId = null;
 
+  // ========= HELPER: detectar HEIC/HEIF =========
+  function isHeicFile(file) {
+    if (!file) return false;
+    const type = (file.type || "").toLowerCase();
+    const name = (file.name || "").toLowerCase();
+    return (
+      type === "image/heic" ||
+      type === "image/heif" ||
+      name.endsWith(".heic") ||
+      name.endsWith(".heif")
+    );
+  }
+
   // ========= THEME TOGGLE (CLARO / ESCURO) =========
 
   (function initTheme() {
@@ -100,6 +113,15 @@ document.addEventListener("DOMContentLoaded", () => {
     quality = 0.6
   ) {
     return new Promise((resolve, reject) => {
+      // HEIC/HEIF não é suportado pelo canvas/Image na maioria dos navegadores
+      if (isHeicFile(file)) {
+        return reject(
+          new Error(
+            "Formato HEIC/HEIF não é suportado pelo navegador. Converta a foto para JPG ou PNG antes de enviar."
+          )
+        );
+      }
+
       const reader = new FileReader();
 
       reader.onerror = () => reject(reader.error);
@@ -120,7 +142,12 @@ document.addEventListener("DOMContentLoaded", () => {
           const dataUrl = canvas.toDataURL("image/jpeg", quality);
           resolve(dataUrl);
         };
-        img.onerror = reject;
+        img.onerror = () =>
+          reject(
+            new Error(
+              "Não foi possível carregar a imagem. Verifique se o formato é suportado (JPG/PNG)."
+            )
+          );
         img.src = reader.result;
       };
 
@@ -159,11 +186,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const files = dt.files;
       const dataTransfer = new DataTransfer();
 
+      let encontrouHeic = false;
+
       Array.from(files).forEach((file) => {
-        if (file.type.startsWith("image/")) {
-          dataTransfer.items.add(file);
+        if (!file.type.startsWith("image/")) return;
+
+        if (isHeicFile(file)) {
+          encontrouHeic = true;
+          return; // não adiciona HEIC na seleção
         }
+
+        dataTransfer.items.add(file);
       });
+
+      if (encontrouHeic) {
+        alert(
+          "Algumas fotos estão em formato HEIC/HEIF (padrão de iPhone) e não são suportadas diretamente.\n" +
+            "Por favor, converta para JPG ou PNG antes de enviar."
+        );
+      }
 
       fotosInput.files = dataTransfer.files;
       atualizarPreviewNovasFotos();
@@ -181,24 +222,47 @@ document.addEventListener("DOMContentLoaded", () => {
     const files = fotosInput.files;
     if (!files || !files.length) return;
 
+    let encontrouHeic = false;
+
     Array.from(files).forEach((file) => {
       if (!file.type.startsWith("image/")) return;
 
       const card = document.createElement("div");
       card.className = "foto-thumb";
 
-      const img = document.createElement("img");
-      img.className = "foto-thumb__img";
-      img.alt = file.name;
-      img.src = URL.createObjectURL(file);
-
       const legend = document.createElement("span");
-      legend.textContent = file.name;
 
-      card.appendChild(img);
-      card.appendChild(legend);
+      if (isHeicFile(file)) {
+        encontrouHeic = true;
+        // Não tenta mostrar thumbnail porque o navegador não renderiza HEIC
+        const aviso = document.createElement("div");
+        aviso.className = "foto-thumb__aviso";
+        aviso.textContent = "Formato HEIC não suportado";
+
+        legend.textContent = file.name + " (HEIC)";
+        card.appendChild(aviso);
+        card.appendChild(legend);
+      } else {
+        const img = document.createElement("img");
+        img.className = "foto-thumb__img";
+        img.alt = file.name;
+        img.src = URL.createObjectURL(file);
+
+        legend.textContent = file.name;
+        card.appendChild(img);
+        card.appendChild(legend);
+      }
+
       novasFotosPreview.appendChild(card);
     });
+
+    if (encontrouHeic) {
+      alert(
+        "Fotos em HEIC foram detectadas.\n" +
+          "O sistema só suporta JPG/PNG porque o navegador não consegue converter HEIC.\n" +
+          "Salve/exporte as fotos do iPhone em JPG/PNG antes de anexar."
+      );
+    }
   }
 
   // ========= Helpers de formulário =========
@@ -444,23 +508,50 @@ document.addEventListener("DOMContentLoaded", () => {
           idEvento = docRef.id;
         }
 
+        let encontrouHeic = false;
+
         // Upload novas fotos em base64
         if (fotosInput && fotosInput.files && fotosInput.files.length) {
           for (let file of fotosInput.files) {
             if (!file.type.startsWith("image/")) continue;
 
-            const dataUrl = await fileToCompressedDataUrl(file);
-            await db
-              .collection("eventos")
-              .doc(idEvento)
-              .collection("fotos")
-              .add({
-                dataUrl,
-                legenda: file.name,
-                criadaEm:
-                  firebase.firestore.FieldValue.serverTimestamp(),
-              });
+            if (isHeicFile(file)) {
+              encontrouHeic = true;
+              console.warn(
+                "Ignorando arquivo HEIC/HEIF na gravação:",
+                file.name
+              );
+              continue; // não tenta subir HEIC
+            }
+
+            try {
+              const dataUrl = await fileToCompressedDataUrl(file);
+              await db
+                .collection("eventos")
+                .doc(idEvento)
+                .collection("fotos")
+                .add({
+                  dataUrl,
+                  legenda: file.name,
+                  criadaEm:
+                    firebase.firestore.FieldValue.serverTimestamp(),
+                });
+            } catch (errImg) {
+              console.error("Erro ao processar imagem:", file.name, errImg);
+              alert(
+                "Erro ao processar a imagem '" +
+                  file.name +
+                  "'. Verifique se ela está em formato JPG/PNG."
+              );
+            }
           }
+        }
+
+        if (encontrouHeic) {
+          alert(
+            "Algumas fotos não foram salvas porque estão em formato HEIC/HEIF.\n" +
+              "Converta essas fotos para JPG/PNG e tente novamente."
+          );
         }
 
         alert(
@@ -474,7 +565,8 @@ document.addEventListener("DOMContentLoaded", () => {
         console.error(err);
         alert(
           "Erro ao salvar o evento ou as fotos.\n" +
-            "Se a imagem for muito pesada, tente tirar um print ou uma foto em resolução menor."
+            "Se a imagem for muito pesada ou estiver em formato não suportado, " +
+            "tente tirar um print ou uma foto em resolução menor (JPG/PNG)."
         );
       } finally {
         toggleFormDisabled(false);
