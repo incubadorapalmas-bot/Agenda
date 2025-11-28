@@ -331,10 +331,10 @@ document.addEventListener("DOMContentLoaded", () => {
         </td>
       `;
 
-      // Clique na linha inteira também abre edição
+      // Clique na linha inteira abre edição
       tr.addEventListener("click", (e) => {
         const isButton = e.target.closest("button");
-        if (isButton) return; // já tem handler específico
+        if (isButton) return;
         abrirEdicaoEvento(ev.id);
       });
 
@@ -369,7 +369,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // ----------- PDFs gerais -----------
-
   function gerarPdfCompleto() {
     const doc = new jsPDF("p", "mm", "a4");
     doc.setFontSize(14);
@@ -467,7 +466,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // ----------- PDF por evento com fotos -----------
-
   async function gerarPdfEventoComFotos(idEvento) {
     try {
       const docRef = await db.collection("eventos").doc(idEvento).get();
