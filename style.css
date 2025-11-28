@@ -1,0 +1,310 @@
+/* ====== Temas (claro/escuro) via CSS custom properties ====== */
+:root {
+  --cor-primaria: #008f4c;
+  --cor-primaria-escura: #006837;
+  --cor-fundo: #f0f2f5;
+  --cor-card: #ffffff;
+  --cor-borda: #d0d7e2;
+  --cor-texto: #222222;
+  --cor-texto-suave: #555555;
+  --cor-header-texto: #ffffff;
+  --cor-header-fundo: linear-gradient(120deg, #008f4c, #006837);
+  --cor-tabela-header: #f7f9fb;
+  --sombra-card: 0 3px 10px rgba(0,0,0,0.06);
+}
+
+/* Tema escuro */
+:root[data-theme="dark"] {
+  --cor-primaria: #30b878;
+  --cor-primaria-escura: #1a7f4a;
+  --cor-fundo: #101318;
+  --cor-card: #171b22;
+  --cor-borda: #303846;
+  --cor-texto: #f5f5f5;
+  --cor-texto-suave: #aab3c5;
+  --cor-header-texto: #f5f5f5;
+  --cor-header-fundo: linear-gradient(120deg, #1a7f4a, #30b878);
+  --cor-tabela-header: #1d232f;
+  --sombra-card: 0 4px 14px rgba(0,0,0,0.6);
+}
+
+/* ====== Reset simples ====== */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--cor-fundo);
+  color: var(--cor-texto);
+  min-height: 100vh;
+}
+
+/* ====== Layout ====== */
+.container {
+  max-width: 1220px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.topo {
+  background: var(--cor-header-fundo);
+  color: var(--cor-header-texto);
+  padding: 1rem 0 1.2rem;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+}
+
+.topo__conteudo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.topo__conteudo h1 {
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+.subtitulo {
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.principal {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.7fr);
+  gap: 1rem;
+  padding: 1rem 0 2.5rem;
+}
+
+.card {
+  background: var(--cor-card);
+  border-radius: 12px;
+  padding: 1rem 1.2rem 1.2rem;
+  box-shadow: var(--sombra-card);
+  border: 1px solid var(--cor-borda);
+}
+
+/* ====== Formulário ====== */
+#form-section h2,
+#lista-section h2 {
+  margin-bottom: 0.9rem;
+  font-size: 1.2rem;
+}
+
+.linha {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+label {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+input[type="text"],
+input[type="date"],
+input[type="time"],
+select,
+textarea {
+  border-radius: 8px;
+  border: 1px solid var(--cor-borda);
+  padding: 0.45rem 0.6rem;
+  font-size: 0.9rem;
+  width: 100%;
+  background: transparent;
+  color: var(--cor-texto);
+}
+
+textarea {
+  resize: vertical;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--cor-texto-suave);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--cor-primaria);
+  box-shadow: 0 0 0 1px rgba(0, 143, 76, 0.28);
+}
+
+small {
+  font-size: 0.75rem;
+  color: var(--cor-texto-suave);
+}
+
+/* ====== Botões ====== */
+.btn {
+  border-radius: 999px;
+  border: 1px solid var(--cor-borda);
+  padding: 0.42rem 0.95rem;
+  font-size: 0.9rem;
+  background: transparent;
+  color: var(--cor-texto);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, border-color 0.15s, transform 0.05s;
+}
+
+.btn.primario {
+  background: var(--cor-primaria);
+  color: #fff;
+  border-color: var(--cor-primaria);
+}
+
+.btn.primario:hover {
+  background: var(--cor-primaria-escura);
+  border-color: var(--cor-primaria-escura);
+}
+
+.btn.secundario {
+  background: rgba(0, 143, 76, 0.08);
+  border-color: rgba(0, 143, 76, 0.25);
+  color: var(--cor-primaria-escura);
+}
+
+.btn:hover {
+  box-shadow: 0 2px 5px rgba(0,0,0,0.18);
+  transform: translateY(-1px);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+  transform: none;
+}
+
+.botoes-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+/* Botão de tema */
+.toggle-tema {
+  font-size: 1.2rem;
+  padding-inline: 0.75rem;
+  background: rgba(0,0,0,0.15);
+  border-color: rgba(255,255,255,0.6);
+  color: #fff;
+}
+
+/* ====== Lista / tabela ====== */
+.cabecalho-lista {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.filtros {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.filtros label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tabela-container {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--cor-borda);
+  margin-bottom: 0.75rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+thead {
+  background: var(--cor-tabela-header);
+}
+
+th, td {
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid var(--cor-borda);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+:root[data-theme="dark"] tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+td.acao-col {
+  white-space: nowrap;
+}
+
+/* ====== Relatórios ====== */
+.relatorios {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* ====== Rodapé ====== */
+.rodape {
+  border-top: 1px solid var(--cor-borda);
+  padding: 0.7rem 0;
+  background: var(--cor-card);
+}
+
+.rodape small {
+  font-size: 0.75rem;
+  color: var(--cor-texto-suave);
+}
+
+/* ====== Responsivo ====== */
+@media (max-width: 900px) {
+  .principal {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .linha {
+    grid-template-columns: 1fr;
+  }
+  .cabecalho-lista {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .filtros {
+    flex-wrap: wrap;
+  }
+}

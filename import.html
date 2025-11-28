@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Importar dados da planilha - Agenda Incubadora</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Firebase (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    body { padding-top: 1rem; }
+    main.card {
+      max-width: 800px;
+      margin: 1rem auto 2rem;
+    }
+    .log {
+      margin-top: 1rem;
+      max-height: 280px;
+      overflow-y: auto;
+      border-radius: 8px;
+      border: 1px solid var(--cor-borda);
+      padding: 0.5rem;
+      font-family: monospace;
+      font-size: 0.8rem;
+      background: rgba(0,0,0,0.03);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h2>Importar eventos da planilha para o Firestore</h2>
+    <p style="margin: 0.5rem 0 0.8rem;">
+      Este utilitário usa o arquivo <strong>seed_data.js</strong> gerado a partir da sua planilha.
+      Ele criará documentos na coleção <code>eventos</code> com os mesmos dados.
+    </p>
+
+    <ol style="font-size: 0.9rem; margin-left: 1rem;">
+      <li>Confirme que o arquivo <code>firebase-config.js</code> está configurado.</li>
+      <li>Abra esta página em um navegador (por exemplo, arrastando o arquivo para o Chrome).</li>
+      <li>Clique em <strong>Importar</strong> apenas uma vez (para evitar eventos duplicados).</li>
+    </ol>
+
+    <button id="btnImport" class="btn primario" style="margin-top: 0.7rem;">Importar eventos</button>
+    <button id="btnDryRun" class="btn secundario" style="margin-top: 0.7rem; margin-left: 0.5rem;">Simular (sem gravar)</button>
+
+    <div class="log" id="log"></div>
+  </main>
+
+  <script src="firebase-config.js"></script>
+  <script src="seed_data.js"></script>
+  <script src="import.js"></script>
+</body>
+</html>

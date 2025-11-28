@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <title>Agenda Incubadora IFPR/PMP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Firebase (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- jsPDF para geração de PDFs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="container topo__conteudo">
+      <div>
+        <h1>Agenda Incubadora IFPR / PMP</h1>
+        <p class="subtitulo">Controle de eventos, fotos e relatórios em PDF</p>
+      </div>
+      <button id="themeToggle" class="btn toggle-tema" type="button" aria-label="Alternar modo claro/escuro">
+        🌙
+      </button>
+    </div>
+  </header>
+
+  <main class="container principal">
+    <section id="form-section" class="card">
+      <h2>Cadastro de evento</h2>
+      <form id="eventoForm" autocomplete="off">
+        <div class="linha">
+          <div class="campo">
+            <label for="evento">Tipo de evento</label>
+            <select id="evento" required>
+              <option value="">Selecione...</option>
+              <option>Orientação</option>
+              <option>Atendimento</option>
+              <option>Alinhamento</option>
+              <option>Reunião</option>
+              <option>Participação</option>
+              <option>Visita Técnica</option>
+              <option>Outro</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label for="local">Local</label>
+            <input id="local" type="text" value="Incubadora" required />
+          </div>
+          <div class="campo">
+            <label for="endereco">Endereço</label>
+            <input id="endereco" type="text" value="PRC 280 Palmas PR" />
+          </div>
+        </div>
+
+        <div class="linha">
+          <div class="campo">
+            <label for="dataInicio">Data início</label>
+            <input id="dataInicio" type="date" required />
+          </div>
+          <div class="campo">
+            <label for="dataFim">Data fim</label>
+            <input id="dataFim" type="date" />
+          </div>
+          <div class="campo">
+            <label for="formato">Formato</label>
+            <select id="formato">
+              <option>Presencial</option>
+              <option>Online</option>
+              <option>Híbrido</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="linha">
+          <div class="campo">
+            <label for="horaInicio">Horário início</label>
+            <input id="horaInicio" type="time" />
+          </div>
+          <div class="campo">
+            <label for="horaFim">Horário fim</label>
+            <input id="horaFim" type="time" />
+          </div>
+          <div class="campo">
+            <label for="participante">Participante / responsável</label>
+            <input id="participante" type="text" />
+          </div>
+        </div>
+
+        <div class="campo">
+          <label for="pauta">Pauta</label>
+          <input id="pauta" type="text" />
+        </div>
+
+        <div class="campo">
+          <label for="comentario">Comentário</label>
+          <textarea id="comentario" rows="3"></textarea>
+        </div>
+
+        <div class="campo">
+          <label for="fotos">Fotos do evento (pode selecionar várias)</label>
+          <input id="fotos" type="file" accept="image/*" multiple />
+          <small>As fotos serão enviadas para o Firebase Storage e vinculadas ao evento.</small>
+        </div>
+
+        <div class="botoes-form">
+          <button type="submit" class="btn primario">Salvar evento</button>
+          <button type="reset" class="btn">Limpar</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="lista-section" class="card">
+      <div class="cabecalho-lista">
+        <h2>Eventos cadastrados</h2>
+        <div class="filtros">
+          <label>De:
+            <input type="date" id="filtroDe">
+          </label>
+          <label>Até:
+            <input type="date" id="filtroAte">
+          </label>
+          <button id="btnFiltrar" class="btn">Filtrar</button>
+          <button id="btnLimparFiltro" class="btn secundario">Limpar filtros</button>
+        </div>
+      </div>
+
+      <div class="tabela-container">
+        <table id="tabelaEventos">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Evento</th>
+              <th>Local</th>
+              <th>Endereço</th>
+              <th>Horário</th>
+              <th>Formato</th>
+              <th>Participante</th>
+              <th>Pauta</th>
+              <th>Comentário</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- linhas geradas via JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="relatorios">
+        <span>Relatórios gerais:</span>
+        <button id="btnPdfCompleto" class="btn primario">PDF completo</button>
+        <button id="btnPdfSimples" class="btn">PDF simples (Michelle)</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="rodape">
+    <div class="container">
+      <small>Agenda Incubadora IFPR / PMP &mdash; Firebase Firestore + Storage</small>
+    </div>
+  </footer>
+
+  <!-- Configuração do Firebase (preencha firebase-config.js) -->
+  <script src="firebase-config.js"></script>
+  <!-- Lógica da aplicação -->
+  <script src="app.js"></script>
+  <!-- Tema -->
+  <script src="theme.js"></script>
+</body>
+</html>
