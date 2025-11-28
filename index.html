@@ -15,6 +15,10 @@
   <!-- jsPDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
+  <!-- heic2any (CONVERSÃO HEIC -> JPG) -->
+  <!-- Importante: sem "defer" e ANTES do app.js -->
+  <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
+
   <!-- Configuração do Firebase -->
   <script src="firebase-config.js"></script>
 
@@ -30,10 +34,8 @@
     <div class="container topo__conteudo">
       <div class="topo__branding">
         <div class="topo__logos">
-          <!-- Ajusta os caminhos das imagens conforme você tem no projeto -->
-           <img src="PMP.png" alt="Prefeitura de Palmas" class="logo" />
+          <img src="PMP.png" alt="Prefeitura de Palmas" class="logo" />
           <img src="IFPR.png" alt="IFPR" class="logo" />
-         
           <img src="Sebrae.png" alt="Incubadora IFPR/PMP" class="logo" />
         </div>
         <div>
@@ -51,7 +53,7 @@
           Agenda simplificada
         </button>
 
-        <!-- Botão de tema (opcional, usa o theme.js) -->
+        <!-- Botão de tema -->
         <button id="btnToggleTema" class="btn toggle-tema" title="Alternar tema">
           🌓
         </button>
@@ -146,7 +148,8 @@
           <div id="dropArea" class="drop-area">
             Arraste e solte as fotos aqui ou <span class="drop-area__link">clique para selecionar</span>
           </div>
-          <input type="file" id="fotos" accept="image/*" multiple hidden />
+          <!-- aceitamos image/* e HEIC explicitamente -->
+          <input type="file" id="fotos" accept="image/*,.heic,.heif" multiple hidden />
           <div id="novasFotosPreview" class="novas-fotos"></div>
         </div>
 
@@ -219,7 +222,7 @@
   </main>
 
   <footer class="rodape">
-    Agenda Incubadora IFPR / PMP — Firebase Firestore + Storage
+    Agenda Incubadora IFPR / PMP — Firebase Firestore
   </footer>
 </body>
 </html>
