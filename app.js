@@ -2,8 +2,24 @@
 // Versão SEM Firebase Storage (fotos vão para o Firestore em base64, com compressão)
 
 document.addEventListener("DOMContentLoaded", () => {
+  // ========= INICIALIZAÇÃO jsPDF (mais robusto) =========
+  // Tenta pegar do window.jspdf.jsPDF ou do window.jsPDF (alguns CDNs usam só window.jsPDF)
+  const jsPDF =
+    (window.jspdf && window.jspdf.jsPDF) || window.jsPDF || null;
+
+  if (!jsPDF) {
+    console.error(
+      "jsPDF não encontrado. Verifique se o script do jsPDF está incluído ANTES do app.js."
+    );
+  }
+
+  // ========= Firestore =========
+  if (!firebase || !firebase.firestore) {
+    console.error(
+      "Firebase Firestore não encontrado. Verifique se os scripts do Firebase foram incluídos corretamente."
+    );
+  }
   const db = firebase.firestore();
-  const { jsPDF } = window.jspdf;
 
   // ========= Referências de elementos =========
   const form = document.getElementById("eventoForm");
@@ -29,8 +45,47 @@ document.addEventListener("DOMContentLoaded", () => {
   const fotosAtuaisWrapper = document.getElementById("fotosAtuaisWrapper");
   const fotosAtuaisDiv = document.getElementById("fotosAtuais");
 
+  // Toggle de tema
+  const btnToggleTema =
+    document.querySelector(".toggle-tema") ||
+    document.getElementById("toggleTema");
+
   let eventosCache = [];
   let eventoEmEdicaoId = null;
+
+  // ========= THEME TOGGLE (CLARO / ESCURO) =========
+
+  (function initTheme() {
+    const html = document.documentElement;
+    const temaSalvo = localStorage.getItem("agenda_tema") || "light";
+    if (temaSalvo === "dark") {
+      html.setAttribute("data-theme", "dark");
+    } else {
+      html.removeAttribute("data-theme");
+    }
+
+    if (btnToggleTema) {
+      atualizarLabelBotaoTema();
+
+      btnToggleTema.addEventListener("click", () => {
+        const atual = html.getAttribute("data-theme");
+        if (atual === "dark") {
+          html.removeAttribute("data-theme");
+          localStorage.setItem("agenda_tema", "light");
+        } else {
+          html.setAttribute("data-theme", "dark");
+          localStorage.setItem("agenda_tema", "dark");
+        }
+        atualizarLabelBotaoTema();
+      });
+    }
+
+    function atualizarLabelBotaoTema() {
+      if (!btnToggleTema) return;
+      const isDark = html.getAttribute("data-theme") === "dark";
+      btnToggleTema.textContent = isDark ? "☀ Claro" : "🌙 Escuro";
+    }
+  })();
 
   // ========= Helpers: compressão de imagem =========
 
@@ -117,10 +172,10 @@ document.addEventListener("DOMContentLoaded", () => {
     fotosInput.addEventListener("change", atualizarPreviewNovasFotos);
   }
 
-  // ========= Preview das novas fotos (AGORA COM IMAGEM) =========
+  // ========= Preview das novas fotos =========
 
   function atualizarPreviewNovasFotos() {
-    if (!novasFotosPreview) return;
+    if (!novasFotosPreview || !fotosInput) return;
 
     novasFotosPreview.innerHTML = "";
     const files = fotosInput.files;
@@ -149,41 +204,59 @@ document.addEventListener("DOMContentLoaded", () => {
   // ========= Helpers de formulário =========
 
   function toggleFormDisabled(flag) {
+    if (!form) return;
     const elements = form.querySelectorAll("input, select, textarea, button");
     elements.forEach((el) => (el.disabled = flag));
   }
 
   function limparFormulario() {
+    if (!form) return;
+
     form.reset();
-    campoEventoId.value = "";
+    if (campoEventoId) campoEventoId.value = "";
     eventoEmEdicaoId = null;
 
     if (novasFotosPreview) novasFotosPreview.innerHTML = "";
     if (fotosAtuaisDiv) fotosAtuaisDiv.innerHTML = "";
-    fotosAtuaisWrapper.classList.add("oculto");
+    if (fotosAtuaisWrapper) fotosAtuaisWrapper.classList.add("oculto");
 
-    formTituloModo.textContent = "Cadastrar novo evento";
-    btnSalvar.textContent = "Salvar evento";
-    btnCancelarEdicao.classList.add("oculto");
+    if (formTituloModo) formTituloModo.textContent = "Cadastrar novo evento";
+    if (btnSalvar) btnSalvar.textContent = "Salvar evento";
+    if (btnCancelarEdicao) btnCancelarEdicao.classList.add("oculto");
   }
 
-  btnCancelarEdicao.addEventListener("click", () => {
-    limparFormulario();
-  });
+  if (btnCancelarEdicao) {
+    btnCancelarEdicao.addEventListener("click", () => {
+      limparFormulario();
+    });
+  }
 
   function preencherFormularioComEvento(ev) {
-    document.getElementById("evento").value = ev.evento || "";
-    document.getElementById("local").value = ev.local || "";
-    document.getElementById("endereco").value = ev.endereco || "";
-    document.getElementById("dataInicio").value = ev.dataInicio || "";
-    document.getElementById("dataFim").value =
-      ev.dataFim || ev.dataInicio || "";
-    document.getElementById("horaInicio").value = ev.horaInicio || "";
-    document.getElementById("horaFim").value = ev.horaFim || "";
-    document.getElementById("formato").value = ev.formato || "Presencial";
-    document.getElementById("participante").value = ev.participante || "";
-    document.getElementById("pauta").value = ev.pauta || "";
-    document.getElementById("comentario").value = ev.comentario || "";
+    const byId = (id) => document.getElementById(id);
+
+    const evento = byId("evento");
+    const local = byId("local");
+    const endereco = byId("endereco");
+    const dataInicio = byId("dataInicio");
+    const dataFim = byId("dataFim");
+    const horaInicio = byId("horaInicio");
+    const horaFim = byId("horaFim");
+    const formato = byId("formato");
+    const participante = byId("participante");
+    const pauta = byId("pauta");
+    const comentario = byId("comentario");
+
+    if (evento) evento.value = ev.evento || "";
+    if (local) local.value = ev.local || "";
+    if (endereco) endereco.value = ev.endereco || "";
+    if (dataInicio) dataInicio.value = ev.dataInicio || "";
+    if (dataFim) dataFim.value = ev.dataFim || ev.dataInicio || "";
+    if (horaInicio) horaInicio.value = ev.horaInicio || "";
+    if (horaFim) horaFim.value = ev.horaFim || "";
+    if (formato) formato.value = ev.formato || "Presencial";
+    if (participante) participante.value = ev.participante || "";
+    if (pauta) pauta.value = ev.pauta || "";
+    if (comentario) comentario.value = ev.comentario || "";
   }
 
   // ========= Buscar fotos de um evento (para PDF) =========
@@ -209,9 +282,11 @@ document.addEventListener("DOMContentLoaded", () => {
     return fotos;
   }
 
-  // ========= Fotos de um evento (já salvas) – MOSTRANDO IMAGEM =========
+  // ========= Fotos de um evento (já salvas) – MOSTRANDO E EXCLUINDO =========
 
   async function carregarFotosDoEvento(idEvento) {
+    if (!fotosAtuaisDiv || !fotosAtuaisWrapper) return;
+
     fotosAtuaisDiv.innerHTML = "";
 
     try {
@@ -244,8 +319,36 @@ document.addEventListener("DOMContentLoaded", () => {
         const caption = document.createElement("span");
         caption.textContent = legenda || "";
 
+        // Botão de excluir foto
+        const btnExcluir = document.createElement("button");
+        btnExcluir.type = "button";
+        btnExcluir.textContent = "Excluir";
+        btnExcluir.className = "btn secundario";
+        btnExcluir.style.marginTop = "4px";
+        btnExcluir.addEventListener("click", async () => {
+          const ok = confirm("Excluir esta foto do evento?");
+          if (!ok) return;
+          try {
+            await db
+              .collection("eventos")
+              .doc(idEvento)
+              .collection("fotos")
+              .doc(docFoto.id)
+              .delete();
+            card.remove();
+
+            if (!fotosAtuaisDiv.querySelector(".foto-thumb")) {
+              fotosAtuaisWrapper.classList.add("oculto");
+            }
+          } catch (err) {
+            console.error("Erro ao excluir foto", err);
+            alert("Erro ao excluir foto. Verifique o console.");
+          }
+        });
+
         card.appendChild(img);
         card.appendChild(caption);
+        card.appendChild(btnExcluir);
         fotosAtuaisDiv.appendChild(card);
       });
     } catch (err) {
@@ -270,13 +373,14 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       eventoEmEdicaoId = idEvento;
-      campoEventoId.value = idEvento;
+      if (campoEventoId) campoEventoId.value = idEvento;
 
       preencherFormularioComEvento(ev);
 
-      formTituloModo.textContent = "Editando evento";
-      btnSalvar.textContent = "Atualizar evento";
-      btnCancelarEdicao.classList.remove("oculto");
+      if (formTituloModo) formTituloModo.textContent = "Editando evento";
+      if (btnSalvar) btnSalvar.textContent = "Atualizar evento";
+      if (btnCancelarEdicao)
+        btnCancelarEdicao.classList.remove("oculto");
 
       await carregarFotosDoEvento(idEvento);
 
@@ -289,94 +393,108 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ========= Salvar (criar/atualizar) evento + fotos =========
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
 
-    const eventoTipo = document.getElementById("evento").value.trim();
-    if (!eventoTipo) {
-      alert("Informe o tipo de evento.");
-      return;
-    }
-
-    const dataInicio = document.getElementById("dataInicio").value;
-    const dataFimInput = document.getElementById("dataFim").value;
-    const dataFim = dataFimInput || dataInicio;
-
-    const docEvento = {
-      evento: eventoTipo,
-      local: document.getElementById("local").value.trim(),
-      endereco: document.getElementById("endereco").value.trim(),
-      dataInicio,
-      dataFim,
-      horaInicio: document.getElementById("horaInicio").value,
-      horaFim: document.getElementById("horaFim").value,
-      formato: document.getElementById("formato").value,
-      participante: document.getElementById("participante").value.trim(),
-      pauta: document.getElementById("pauta").value.trim(),
-      comentario: document.getElementById("comentario").value.trim(),
-      atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-    };
-
-    try {
-      toggleFormDisabled(true);
-
-      let idEvento;
-
-      if (eventoEmEdicaoId) {
-        idEvento = eventoEmEdicaoId;
-        await db.collection("eventos").doc(idEvento).update(docEvento);
-      } else {
-        docEvento.criadoEm = firebase.firestore.FieldValue.serverTimestamp();
-        const docRef = await db.collection("eventos").add(docEvento);
-        idEvento = docRef.id;
+      const campoEvento = document.getElementById("evento");
+      if (!campoEvento || !campoEvento.value.trim()) {
+        alert("Informe o tipo de evento.");
+        return;
       }
+      const eventoTipo = campoEvento.value.trim();
 
-      // Upload novas fotos em base64 para subcoleção "fotos"
-      const files = fotosInput.files;
-      for (let file of files) {
-        if (!file.type.startsWith("image/")) continue;
+      const campoDataInicio = document.getElementById("dataInicio");
+      const campoDataFim = document.getElementById("dataFim");
 
-        const dataUrl = await fileToCompressedDataUrl(file);
-        await db
-          .collection("eventos")
-          .doc(idEvento)
-          .collection("fotos")
-          .add({
-            dataUrl,
-            legenda: file.name,
-            criadaEm: firebase.firestore.FieldValue.serverTimestamp(),
-          });
+      const dataInicio = campoDataInicio ? campoDataInicio.value : "";
+      const dataFimInput = campoDataFim ? campoDataFim.value : "";
+      const dataFim = dataFimInput || dataInicio;
+
+      const docEvento = {
+        evento: eventoTipo,
+        local: (document.getElementById("local")?.value || "").trim(),
+        endereco:
+          (document.getElementById("endereco")?.value || "").trim(),
+        dataInicio,
+        dataFim,
+        horaInicio: document.getElementById("horaInicio")?.value || "",
+        horaFim: document.getElementById("horaFim")?.value || "",
+        formato: document.getElementById("formato")?.value || "",
+        participante:
+          (document.getElementById("participante")?.value || "").trim(),
+        pauta: (document.getElementById("pauta")?.value || "").trim(),
+        comentario:
+          (document.getElementById("comentario")?.value || "").trim(),
+        atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+      };
+
+      try {
+        toggleFormDisabled(true);
+
+        let idEvento;
+
+        if (eventoEmEdicaoId) {
+          idEvento = eventoEmEdicaoId;
+          await db.collection("eventos").doc(idEvento).update(docEvento);
+        } else {
+          docEvento.criadoEm =
+            firebase.firestore.FieldValue.serverTimestamp();
+          const docRef = await db.collection("eventos").add(docEvento);
+          idEvento = docRef.id;
+        }
+
+        // Upload novas fotos em base64
+        if (fotosInput && fotosInput.files && fotosInput.files.length) {
+          for (let file of fotosInput.files) {
+            if (!file.type.startsWith("image/")) continue;
+
+            const dataUrl = await fileToCompressedDataUrl(file);
+            await db
+              .collection("eventos")
+              .doc(idEvento)
+              .collection("fotos")
+              .add({
+                dataUrl,
+                legenda: file.name,
+                criadaEm:
+                  firebase.firestore.FieldValue.serverTimestamp(),
+              });
+          }
+        }
+
+        alert(
+          eventoEmEdicaoId
+            ? "Evento atualizado com sucesso!"
+            : "Evento salvo com sucesso!"
+        );
+        limparFormulario();
+        await carregarEventos();
+      } catch (err) {
+        console.error(err);
+        alert(
+          "Erro ao salvar o evento ou as fotos.\n" +
+            "Se a imagem for muito pesada, tente tirar um print ou uma foto em resolução menor."
+        );
+      } finally {
+        toggleFormDisabled(false);
       }
-
-      alert(
-        eventoEmEdicaoId
-          ? "Evento atualizado com sucesso!"
-          : "Evento salvo com sucesso!"
-      );
-      limparFormulario();
-      await carregarEventos();
-    } catch (err) {
-      console.error(err);
-      alert(
-        "Erro ao salvar o evento ou as fotos.\n" +
-          "Se a imagem for muito pesada, tente tirar um print ou uma foto em resolução menor."
-      );
-    } finally {
-      toggleFormDisabled(false);
-    }
-  });
+    });
+  }
 
   // ========= Carregar e listar eventos =========
 
   async function carregarEventos() {
+    if (!tabelaBody) return;
+
     tabelaBody.innerHTML = "";
     eventosCache = [];
 
     try {
       let query = db.collection("eventos").orderBy("dataInicio", "asc");
 
-      const de = filtroDe.value;
-      const ate = filtroAte.value;
+      const de = filtroDe?.value;
+      const ate = filtroAte?.value;
 
       if (de) query = query.where("dataInicio", ">=", de);
       if (ate) query = query.where("dataInicio", "<=", ate);
@@ -397,13 +515,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderTabela() {
+    if (!tabelaBody) return;
+
     tabelaBody.innerHTML = "";
 
     if (!eventosCache.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = 10;
-      td.textContent = "Nenhum evento encontrado para o filtro selecionado.";
+      td.textContent =
+        "Nenhum evento encontrado para o filtro selecionado.";
       tr.appendChild(td);
       tabelaBody.appendChild(tr);
       return;
@@ -448,6 +569,7 @@ document.addEventListener("DOMContentLoaded", () => {
       tabelaBody.appendChild(tr);
     });
 
+    // Botões "Editar / Fotos"
     document.querySelectorAll(".btn-editar").forEach((btn) =>
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -455,6 +577,7 @@ document.addEventListener("DOMContentLoaded", () => {
       })
     );
 
+    // Botões "PDF (evento)"
     document.querySelectorAll(".btn-pdf-evento").forEach((btn) =>
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -465,18 +588,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ========= Filtros =========
 
-  btnFiltrar.addEventListener("click", carregarEventos);
+  if (btnFiltrar) {
+    btnFiltrar.addEventListener("click", carregarEventos);
+  }
 
-  btnLimparFiltro.addEventListener("click", () => {
-    filtroDe.value = "";
-    filtroAte.value = "";
-    carregarEventos();
-  });
+  if (btnLimparFiltro) {
+    btnLimparFiltro.addEventListener("click", () => {
+      if (filtroDe) filtroDe.value = "";
+      if (filtroAte) filtroAte.value = "";
+      carregarEventos();
+    });
+  }
 
   // ========= PDFs gerais (com fotos) – ESTILO EMPRESARIAL =========
 
   function obterDescricaoPeriodo() {
-    if (!filtroDe.value && !filtroAte.value) {
+    if (!filtroDe?.value && !filtroAte?.value) {
       return "Todos os eventos cadastrados";
     }
 
@@ -516,9 +643,14 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.line(10, 38, 200, 38);
   }
 
-  // ========= Relatório completo – visão gerencial (COM FOTOS + BORDAS) =========
+  // ========= Relatório completo – visão gerencial =========
 
   async function gerarPdfCompleto() {
+    if (!jsPDF) {
+      alert("jsPDF não foi carregado. Verifique os scripts.");
+      return;
+    }
+
     const doc = new jsPDF("p", "mm", "a4");
 
     gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
@@ -565,7 +697,7 @@ document.addEventListener("DOMContentLoaded", () => {
         doc.setFont("helvetica", "normal");
       }
 
-      const eventTop = y; // para borda
+      const eventTop = y;
 
       const dataEv = ev.dataInicio || "";
       const tipoEv = ev.evento || "";
@@ -597,7 +729,10 @@ document.addEventListener("DOMContentLoaded", () => {
           y += 4;
           if (y > 270) {
             doc.addPage();
-            gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
+            gerarCabecalhoCorporativo(
+              doc,
+              "Relatório Gerencial de Eventos"
+            );
             y = 44;
           }
         }
@@ -609,7 +744,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       y += 4;
 
-      // Bloco de detalhes (estilo relatório de empresa)
+      // Bloco de detalhes
       const horarioStr =
         (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "");
       const dataFimStr =
@@ -717,15 +852,20 @@ document.addEventListener("DOMContentLoaded", () => {
       doc.setLineWidth(0.3);
       doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
 
-      y += 2; // espaçamento entre eventos
+      y += 2;
     }
 
     doc.save("relatorio-gerencial-eventos-incubadora.pdf");
   }
 
-  // ========= Relatório simplificado (COM FOTOS + BORDAS) =========
+  // ========= Relatório simplificado =========
 
   async function gerarPdfSimples() {
+    if (!jsPDF) {
+      alert("jsPDF não foi carregado. Verifique os scripts.");
+      return;
+    }
+
     const doc = new jsPDF("p", "mm", "a4");
 
     gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
@@ -750,7 +890,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (y > 275) {
         doc.addPage();
-        gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
+        gerarCabecalhoCorporativo(
+          doc,
+          "Agenda Simplificada – Michelle"
+        );
         y = 44;
         cabecalhoSimples();
       }
@@ -868,26 +1011,35 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.save("agenda-simplificada-michelle.pdf");
   }
 
-  // Botões de PDF (no cabeçalho) – agora chamando funções assíncronas
-  btnPdfCompleto.addEventListener("click", async () => {
-    if (!eventosCache.length) {
-      alert("Não há eventos carregados para gerar o PDF.");
-      return;
-    }
-    await gerarPdfCompleto();
-  });
+  // Botões de PDF (no cabeçalho)
+  if (btnPdfCompleto) {
+    btnPdfCompleto.addEventListener("click", async () => {
+      if (!eventosCache.length) {
+        alert("Não há eventos carregados para gerar o PDF.");
+        return;
+      }
+      await gerarPdfCompleto();
+    });
+  }
 
-  btnPdfSimples.addEventListener("click", async () => {
-    if (!eventosCache.length) {
-      alert("Não há eventos carregados para gerar o PDF.");
-      return;
-    }
-    await gerarPdfSimples();
-  });
+  if (btnPdfSimples) {
+    btnPdfSimples.addEventListener("click", async () => {
+      if (!eventosCache.length) {
+        alert("Não há eventos carregados para gerar o PDF.");
+        return;
+      }
+      await gerarPdfSimples();
+    });
+  }
 
-  // ========= PDF por evento com fotos (mantido) =========
+  // ========= PDF por evento com fotos =========
 
   async function gerarPdfEventoComFotos(idEvento) {
+    if (!jsPDF) {
+      alert("jsPDF não foi carregado. Verifique os scripts.");
+      return;
+    }
+
     try {
       const docRef = await db.collection("eventos").doc(idEvento).get();
       if (!docRef.exists) {
