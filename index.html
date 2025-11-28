@@ -5,40 +5,68 @@
   <title>Agenda Incubadora IFPR / PMP</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Firebase (SDK compatível com firebase.*) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <!-- CSS -->
+  <link rel="stylesheet" href="style.css" />
 
-  <!-- jsPDF para geração de PDFs -->
+  <!-- Firebase (ajusta as versões se já estiver usando outras) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+  <!-- jsPDF -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-  <link rel="stylesheet" href="style.css" />
+  <!-- Configuração do Firebase -->
+  <script src="firebase-config.js"></script>
+
+  <!-- Tema (dark / light) -->
+  <script src="theme.js" defer></script>
+
+  <!-- App -->
+  <script src="app.js" defer></script>
 </head>
 <body>
+  <!-- TOPO / CABEÇALHO -->
   <header class="topo">
     <div class="container topo__conteudo">
       <div class="topo__branding">
         <div class="topo__logos">
-          <img src="IFPR.png" alt="IFPR" class="logo">
-          <img src="PMP.png" alt="Prefeitura de Palmas" class="logo">
-          <img src="Sebrae.png" alt="Incubadora IFPR" class="logo">
+          <!-- Ajusta os caminhos das imagens conforme você tem no projeto -->
+          <img src="img/logo-ifpr.png" alt="IFPR" class="logo" />
+          <img src="img/logo-prefeitura.png" alt="Prefeitura de Palmas" class="logo" />
+          <img src="img/logo-incubadora.png" alt="Incubadora IFPR/PMP" class="logo" />
         </div>
-        <div class="topo__texto">
+        <div>
           <h1>Agenda Incubadora IFPR / PMP</h1>
-          <p class="subtitulo">Controle de eventos, fotos e relatórios em PDF</p>
+          <p class="subtitulo">Controle de eventos, fotos e relatórios gerenciais em PDF</p>
         </div>
       </div>
-      <button id="themeToggle" class="btn toggle-tema" type="button" aria-label="Alternar modo claro/escuro">
-        🌙
-      </button>
+
+      <div class="topo__acoes">
+        <!-- BOTÕES DE PDF NO CABEÇALHO -->
+        <button id="btnPdfCompleto" class="btn primario">
+          Relatório completo
+        </button>
+        <button id="btnPdfSimples" class="btn secundario">
+          Agenda simplificada
+        </button>
+
+        <!-- Botão de tema (opcional, usa o theme.js) -->
+        <button id="btnToggleTema" class="btn toggle-tema" title="Alternar tema">
+          🌓
+        </button>
+      </div>
     </div>
   </header>
 
   <main class="container principal">
+    <!-- CARD FORMULÁRIO -->
     <section id="form-section" class="card">
-      <h2><span id="formTituloModo">Cadastrar novo evento</span></h2>
-      <form id="eventoForm" autocomplete="off">
+      <h2 id="formTituloModo">Cadastrar novo evento</h2>
+      <p class="subtexto">
+        Registre atendimentos, orientações, reuniões e outras ações da incubadora.
+      </p>
+
+      <form id="eventoForm">
         <input type="hidden" id="eventoId" />
 
         <div class="linha">
@@ -55,24 +83,26 @@
               <option>Outro</option>
             </select>
           </div>
+
           <div class="campo">
             <label for="local">Local</label>
-            <input id="local" type="text" value="Incubadora" required />
+            <input type="text" id="local" />
           </div>
+
           <div class="campo">
             <label for="endereco">Endereço</label>
-            <input id="endereco" type="text" value="PRC 280 Palmas PR" />
+            <input type="text" id="endereco" />
           </div>
         </div>
 
         <div class="linha">
           <div class="campo">
             <label for="dataInicio">Data início</label>
-            <input id="dataInicio" type="date" required />
+            <input type="date" id="dataInicio" />
           </div>
           <div class="campo">
             <label for="dataFim">Data fim</label>
-            <input id="dataFim" type="date" />
+            <input type="date" id="dataFim" />
           </div>
           <div class="campo">
             <label for="formato">Formato</label>
@@ -87,21 +117,21 @@
         <div class="linha">
           <div class="campo">
             <label for="horaInicio">Horário início</label>
-            <input id="horaInicio" type="time" />
+            <input type="time" id="horaInicio" />
           </div>
           <div class="campo">
             <label for="horaFim">Horário fim</label>
-            <input id="horaFim" type="time" />
+            <input type="time" id="horaFim" />
           </div>
           <div class="campo">
             <label for="participante">Participante / responsável</label>
-            <input id="participante" type="text" />
+            <input type="text" id="participante" />
           </div>
         </div>
 
         <div class="campo">
           <label for="pauta">Pauta</label>
-          <input id="pauta" type="text" />
+          <textarea id="pauta" rows="2"></textarea>
         </div>
 
         <div class="campo">
@@ -109,43 +139,53 @@
           <textarea id="comentario" rows="3"></textarea>
         </div>
 
+        <!-- FOTOS -->
         <div class="campo">
           <label>Fotos do evento</label>
           <div id="dropArea" class="drop-area">
-            <p>Arraste e solte as fotos aqui ou <span class="drop-area__link">clique para selecionar</span></p>
-            <input id="fotos" type="file" accept="image/*" multiple hidden />
+            Arraste e solte as fotos aqui ou <span class="drop-area__link">clique para selecionar</span>
           </div>
-          <small>As fotos serão enviadas para o Firebase Storage e vinculadas ao evento.</small>
-          <div id="novasFotosPreview" class="fotos-grid novas-fotos"></div>
+          <input type="file" id="fotos" accept="image/*" multiple hidden />
+          <div id="novasFotosPreview" class="novas-fotos"></div>
         </div>
 
         <div id="fotosAtuaisWrapper" class="fotos-atuais oculto">
-          <p class="fotos-atuais__titulo">Fotos já cadastradas para este evento:</p>
+          <div class="fotos-atuais__titulo">Fotos já cadastradas para este evento:</div>
           <div id="fotosAtuais" class="fotos-grid"></div>
         </div>
 
         <div class="botoes-form">
-          <button type="submit" class="btn primario" id="btnSalvar">Salvar evento</button>
-          <button type="button" class="btn secundario oculto" id="btnCancelarEdicao">Cancelar edição</button>
+          <button type="submit" id="btnSalvar" class="btn primario">
+            Salvar evento
+          </button>
+          <button type="button" id="btnCancelarEdicao" class="btn secundario oculto">
+            Cancelar edição
+          </button>
         </div>
       </form>
     </section>
 
+    <!-- CARD LISTA / TABELA -->
     <section id="lista-section" class="card">
       <div class="cabecalho-lista">
         <div>
           <h2>Eventos cadastrados</h2>
-          <p class="subtexto">Clique em uma linha ou em “Editar / Fotos” para alterar o relatório do evento.</p>
+          <p class="subtexto">
+            Clique em uma linha ou em “Editar / Fotos” para alterar o relatório do evento.
+          </p>
         </div>
+
         <div class="filtros">
-          <label>De:
-            <input type="date" id="filtroDe">
+          <label>
+            De:
+            <input type="date" id="filtroDe" />
           </label>
-          <label>Até:
-            <input type="date" id="filtroAte">
+          <label>
+            Até:
+            <input type="date" id="filtroAte" />
           </label>
-          <button id="btnFiltrar" class="btn">Filtrar</button>
-          <button id="btnLimparFiltro" class="btn secundario">Limpar</button>
+          <button type="button" id="btnFiltrar" class="btn primario">Filtrar</button>
+          <button type="button" id="btnLimparFiltro" class="btn secundario">Limpar</button>
         </div>
       </div>
 
@@ -162,32 +202,23 @@
               <th>Participante</th>
               <th>Pauta</th>
               <th>Comentário</th>
-              <th style="width: 170px;">Ações</th>
+              <th class="acao-col">Ações</th>
             </tr>
           </thead>
           <tbody>
-            <!-- linhas via JS -->
+            <!-- preenchido via app.js -->
           </tbody>
         </table>
       </div>
 
       <div class="relatorios">
-        <span>Relatórios gerais:</span>
-        <button id="btnPdfCompleto" class="btn primario">PDF completo</button>
-        <button id="btnPdfSimples" class="btn">PDF simples (Michelle)</button>
+        <span>Relatórios gerais: use os botões no cabeçalho.</span>
       </div>
     </section>
   </main>
 
   <footer class="rodape">
-    <div class="container">
-      <small>Agenda Incubadora IFPR / PMP &mdash; Firebase Firestore + Storage</small>
-    </div>
+    Agenda Incubadora IFPR / PMP — Firebase Firestore + Storage
   </footer>
-
-  <!-- scripts -->
-  <script src="firebase-config.js"></script>
-  <script src="theme.js"></script>
-  <script src="app.js"></script>
 </body>
 </html>
