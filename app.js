@@ -1,8 +1,8 @@
-// app.js - lógica da Agenda Incubadora IFPR/PMP
+// app.js - Agenda Incubadora IFPR/PMP
+// Versão SEM Firebase Storage (fotos vão para o Firestore em base64, com compressão)
 
 document.addEventListener("DOMContentLoaded", () => {
   const db = firebase.firestore();
-  const storage = firebase.storage();
   const { jsPDF } = window.jspdf;
 
   // Referências de elementos
@@ -29,7 +29,47 @@ document.addEventListener("DOMContentLoaded", () => {
   let eventosCache = [];
   let eventoEmEdicaoId = null;
 
-  // ----------- Drag & Drop de fotos -----------
+  // =========================
+  // Helpers: compressão de imagem
+  // =========================
+
+  /**
+   * Converte um File de imagem em dataURL comprimido.
+   * Reduz resolução e qualidade para caber no limite de 1MB/doc do Firestore.
+   */
+  function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, quality = 0.6) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+          const targetWidth = Math.round(width * ratio);
+          const targetHeight = Math.round(height * ratio);
+
+          const canvas = document.createElement("canvas");
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          resolve(dataUrl);
+        };
+        img.onerror = reject;
+        img.src = reader.result;
+      };
+
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // =========================
+  // Drag & Drop de fotos
+  // =========================
   if (dropArea && fotosInput) {
     const preventDefaults = (e) => {
       e.preventDefault();
@@ -88,7 +128,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // ----------- Helpers de formulário -----------
+  // =========================
+  // Helpers de formulário
+  // =========================
   function toggleFormDisabled(flag) {
     const elements = form.querySelectorAll("input, select, textarea, button");
     elements.forEach((el) => (el.disabled = flag));
@@ -141,11 +183,14 @@ document.addEventListener("DOMContentLoaded", () => {
       fotosAtuaisWrapper.classList.remove("oculto");
 
       snap.forEach((docFoto) => {
-        const { url, legenda } = docFoto.data();
+        const { dataUrl, url, legenda } = docFoto.data();
+        const src = dataUrl || url || "";
+        if (!src) return;
+
         const card = document.createElement("div");
         card.className = "foto-thumb";
         card.innerHTML = `
-          <img src="${url}" alt="${legenda || ""}">
+          <img src="${src}" alt="${legenda || ""}">
           <span>${legenda || ""}</span>
         `;
         fotosAtuaisDiv.appendChild(card);
@@ -184,7 +229,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // ----------- Salvar (criar ou atualizar) evento -----------
+  // =========================
+  // Salvar (criar ou atualizar) evento + fotos
+  // =========================
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
 
@@ -226,19 +273,18 @@ document.addEventListener("DOMContentLoaded", () => {
         idEvento = docRef.id;
       }
 
-      // Upload de novas fotos (não remove as antigas)
+      // Upload de novas fotos para o Firestore (sem Storage)
       const files = fotosInput.files;
       for (let file of files) {
-        const storageRef = storage.ref(`eventos/${idEvento}/${file.name}`);
-        const snapshot = await storageRef.put(file);
-        const url = await snapshot.ref.getDownloadURL();
+        if (!file.type.startsWith("image/")) continue;
 
+        const dataUrl = await fileToCompressedDataUrl(file);
         await db
           .collection("eventos")
           .doc(idEvento)
           .collection("fotos")
           .add({
-            url,
+            dataUrl,
             legenda: file.name,
             criadaEm: firebase.firestore.FieldValue.serverTimestamp()
           });
@@ -254,13 +300,17 @@ document.addEventListener("DOMContentLoaded", () => {
       await carregarEventos();
     } catch (err) {
       console.error(err);
-      alert("Erro ao salvar o evento. Verifique o console.");
+      alert(
+        "Erro ao salvar o evento ou as fotos. Se a imagem for muito pesada, tente tirar um print ou uma foto em resolução menor."
+      );
     } finally {
       toggleFormDisabled(false);
     }
   });
 
-  // ----------- Carregar e listar eventos -----------
+  // =========================
+  // Carregar e listar eventos
+  // =========================
   async function carregarEventos() {
     tabelaBody.innerHTML = "";
     eventosCache = [];
@@ -360,7 +410,9 @@ document.addEventListener("DOMContentLoaded", () => {
       );
   }
 
-  // ----------- Filtros -----------
+  // =========================
+  // Filtros
+  // =========================
   btnFiltrar.addEventListener("click", carregarEventos);
   btnLimparFiltro.addEventListener("click", () => {
     filtroDe.value = "";
@@ -368,7 +420,9 @@ document.addEventListener("DOMContentLoaded", () => {
     carregarEventos();
   });
 
-  // ----------- PDFs gerais -----------
+  // =========================
+  // PDFs gerais (sem fotos)
+  // =========================
   function gerarPdfCompleto() {
     const doc = new jsPDF("p", "mm", "a4");
     doc.setFontSize(14);
@@ -465,7 +519,9 @@ document.addEventListener("DOMContentLoaded", () => {
     gerarPdfSimples();
   });
 
-  // ----------- PDF por evento com fotos -----------
+  // =========================
+  // PDF por evento com fotos (do Firestore)
+  // =========================
   async function gerarPdfEventoComFotos(idEvento) {
     try {
       const docRef = await db.collection("eventos").doc(idEvento).get();
@@ -521,15 +577,16 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       for (const fotoDoc of fotosSnap.docs) {
-        const { url, legenda } = fotoDoc.data();
-        const dataUrl = await urlToDataUrl(url);
+        const { dataUrl, url, legenda } = fotoDoc.data();
+        const src = dataUrl || url;
+        if (!src) continue;
 
         if (y > 200) {
           doc.addPage();
           y = 10;
         }
 
-        doc.addImage(dataUrl, "JPEG", 10, y, 80, 60);
+        doc.addImage(src, "JPEG", 10, y, 80, 60);
         if (legenda) {
           doc.setFontSize(9);
           doc.text(doc.splitTextToSize(legenda, 80), 10, y + 63);
@@ -550,18 +607,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function urlToDataUrl(url) {
-    const response = await fetch(url);
-    const blob = await response.blob();
-
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
-
-  // ----------- Inicialização -----------
+  // =========================
+  // Inicialização
+  // =========================
   carregarEventos();
 });
