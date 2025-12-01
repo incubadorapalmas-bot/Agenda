@@ -672,7 +672,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!eventosCache.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 10;
+      td.colSpan = 11; // agora temos uma coluna extra de ID
       td.textContent =
         "Nenhum evento encontrado para o filtro selecionado.";
       tr.appendChild(td);
@@ -680,7 +680,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    eventosCache.forEach((ev) => {
+    eventosCache.forEach((ev, index) => {
       const tr = document.createElement("tr");
       tr.dataset.id = ev.id;
 
@@ -689,7 +689,13 @@ document.addEventListener("DOMContentLoaded", () => {
         (ev.horaInicio || ev.horaFim ? " - " : "") +
         (ev.horaFim || "");
 
+      const displayId =
+        ev.idSequencial !== undefined && ev.idSequencial !== null
+          ? ev.idSequencial
+          : index + 1;
+
       tr.innerHTML = `
+        <td>${displayId}</td>
         <td>${ev.dataInicio || ""}</td>
         <td>${ev.evento || ""}</td>
         <td>${ev.local || ""}</td>
@@ -814,7 +820,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.text("#", col.idx, y);
+    doc.text("ID", col.idx, y); // era "#"
     doc.text("Data", col.data, y);
     doc.text("Tipo", col.tipo, y);
     doc.text("Local", col.local, y);
@@ -834,7 +840,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         doc.setFont("helvetica", "bold");
         doc.setFontSize(9);
-        doc.text("#", col.idx, y);
+        doc.text("ID", col.idx, y);
         doc.text("Data", col.data, y);
         doc.text("Tipo", col.tipo, y);
         doc.text("Local", col.local, y);
@@ -846,13 +852,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const eventTop = y;
 
+      const displayId =
+        ev.idSequencial !== undefined && ev.idSequencial !== null
+          ? ev.idSequencial
+          : index + 1;
+
       const dataEv = ev.dataInicio || "";
       const tipoEv = ev.evento || "";
       const localEv = ev.local || "";
       const partEv = ev.participante || "";
       const formatoEv = ev.formato || "";
 
-      doc.text(String(index + 1), col.idx, y);
+      doc.text(String(displayId), col.idx, y);
       doc.text(dataEv, col.data, y);
 
       const tipoLines = doc.splitTextToSize(tipoEv, col.local - col.tipo - 2);
@@ -881,6 +892,17 @@ document.addEventListener("DOMContentLoaded", () => {
               "Relatório Gerencial de Eventos"
             );
             y = 44;
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.text("ID", col.idx, y);
+            doc.text("Data", col.data, y);
+            doc.text("Tipo", col.tipo, y);
+            doc.text("Local", col.local, y);
+            doc.text("Participante", col.participante, y);
+            doc.text("Formato", col.formato, y);
+            y += 4;
+            doc.setFont("helvetica", "normal");
           }
         }
         if (tipoLines[i]) doc.text(tipoLines[i], col.tipo, y);
@@ -1019,7 +1041,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const cabecalhoSimples = () => {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
-      doc.text("#", 10, y);
+      doc.text("ID", 10, y); // era "#"
       doc.text("Data", 18, y);
       doc.text("Evento / Local", 40, y);
       doc.text("Comentário", 125, y);
@@ -1043,6 +1065,11 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const eventTop = y;
+
+      const displayId =
+        ev.idSequencial !== undefined && ev.idSequencial !== null
+          ? ev.idSequencial
+          : index + 1;
 
       const dataEv = ev.dataInicio || "";
       const linhaEvento = `${ev.evento || ""}${
@@ -1069,7 +1096,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (i === 0) {
-          doc.text(String(index + 1), 10, y);
+          doc.text(String(displayId), 10, y);
           doc.text(dataEv, 18, y);
         }
         if (eventoLines[i]) doc.text(eventoLines[i], 40, y);
@@ -1204,6 +1231,9 @@ document.addEventListener("DOMContentLoaded", () => {
       let y = 18;
 
       const infos = [
+        ev.idSequencial
+          ? `ID do evento: ${ev.idSequencial}`
+          : null,
         `Evento: ${ev.evento || ""}`,
         `Data: ${ev.dataInicio || ""}${
           ev.dataFim && ev.dataFim !== ev.dataInicio
