@@ -369,45 +369,45 @@ document.addEventListener("DOMContentLoaded", () => {
       limparFormulario();
     });
   }
+function preencherFormularioComEvento(ev) {
+  const byId = (id) => document.getElementById(id);
 
-  function preencherFormularioComEvento(ev) {
-    const byId = (id) => document.getElementById(id);
+  const evento = byId("evento");
+  const local = byId("local");
+  const endereco = byId("endereco");
+  const dataInicio = byId("dataInicio");
+  const dataFim = byId("dataFim");
+  const horaInicio = byId("horaInicio");
+  const horaFim = byId("horaFim");
+  const formato = byId("formato");
+  const participante = byId("participante");
+  const pauta = byId("pauta");
+  const comentario = byId("comentario");
 
-    const evento = byId("evento");
-    const local = byId("local");
-    const endereco = byId("endereco");
-    const dataInicio = byId("dataInicio");
-    const dataFim = byId("dataFim");
-    const horaInicio = byId("horaInicio");
-    const horaFim = byId("horaFim");
-    const formato = byId("formato");
-    const participante = byId("participante");
-    const pauta = byId("pauta");
-    const comentario = byId("comentario");
-
-    if (campoCodigo) {
-      // mostra código fixo se existir
-      const cod =
-        ev.codigo !== undefined && ev.codigo !== null
-          ? ev.codigo
-          : ev.idSequencial !== undefined && ev.idSequencial !== null
-          ? ev.idSequencial
-          : "";
-      campoCodigo.value = cod;
-    }
-
-    if (evento) evento.value = ev.evento || "";
-    if (local) local.value = ev.local || "";
-    if (endereco) endereco.value = ev.endereco || "";
-    if (dataInicio) dataInicio.value = ev.dataInicio || "";
-    if (dataFim) dataFim.value = ev.dataFim || ev.dataInicio || "";
-    if (horaInicio) horaInicio.value = ev.horaInicio || "";
-    if (horaFim) horaFim.value = ev.horaFim || "";
-    if (formato) formato.value = ev.formato || "Presencial";
-    if (participante) participante.value = ev.participante || "";
-    if (pauta) pauta.value = ev.pauta || "";
-    if (comentario) comentario.value = ev.comentario || "";
+  // 🔴 AQUI É O PONTO CRÍTICO PRO CÓDIGO
+  if (campoCodigo) {
+    const cod =
+      ev.codigo !== undefined && ev.codigo !== null
+        ? ev.codigo
+        : ev.idSequencial !== undefined && ev.idSequencial !== null
+        ? ev.idSequencial
+        : ""; // se não tiver nenhum, fica vazio
+    campoCodigo.value = cod;
   }
+
+  if (evento) evento.value = ev.evento || "";
+  if (local) local.value = ev.local || "";
+  if (endereco) endereco.value = ev.endereco || "";
+  if (dataInicio) dataInicio.value = ev.dataInicio || "";
+  if (dataFim) dataFim.value = ev.dataFim || ev.dataInicio || "";
+  if (horaInicio) horaInicio.value = ev.horaInicio || "";
+  if (horaFim) horaFim.value = ev.horaFim || "";
+  if (formato) formato.value = ev.formato || "Presencial";
+  if (participante) participante.value = ev.participante || "";
+  if (pauta) pauta.value = ev.pauta || "";
+  if (comentario) comentario.value = ev.comentario || "";
+}
+
 
   // ========= Buscar fotos de um evento (para PDF) =========
 
