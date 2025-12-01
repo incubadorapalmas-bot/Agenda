@@ -1,5 +1,5 @@
 // import.js - cria documentos de eventos a partir de AGENDA_SEED no Firestore
-// Agora com idSequencial: mais novo = 1, mais antigo = último
+// Agora com idSequencial: 1 = MAIS ANTIGO, N = MAIS RECENTE
 
 (function () {
   const db = firebase.firestore();
@@ -37,19 +37,22 @@
         AGENDA_SEED.length
     );
 
-    // 🔹 1) Ordenar do mais novo para o mais antigo usando dataInicio
+    // 1) Ordenar do MAIS ANTIGO para o MAIS RECENTE usando dataInicio
+    //    Assim: primeiro da lista => idSequencial = 1
+    //           último da lista  => idSequencial = 187 (no teu caso)
     const eventosOrdenados = [...AGENDA_SEED].sort((a, b) => {
       const ta = a.dataInicio ? new Date(a.dataInicio).getTime() : 0;
       const tb = b.dataInicio ? new Date(b.dataInicio).getTime() : 0;
-      // mais novo primeiro
-      return tb - ta;
+      // mais antigo primeiro
+      return ta - tb;
     });
 
     let count = 0;
+
     for (const ev of eventosOrdenados) {
       count++;
 
-      // 🔹 2) Gerar ID sequencial: mais novo = 1, mais antigo = total
+      // 2) Gerar ID sequencial: 1 = mais antigo, N = mais recente
       const idSequencial = count;
 
       if (dryRun) {
@@ -69,10 +72,11 @@
       try {
         await db.collection("eventos").add({
           ...ev,
-          idSequencial: idSequencial, // 🔹 3) ID numérico gravado no Firestore
+          idSequencial: idSequencial, // campo numérico 1..187
           criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-          atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
+          atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
         });
+
         log(
           "Importado " +
             count +
