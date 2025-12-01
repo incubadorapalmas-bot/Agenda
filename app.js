@@ -111,6 +111,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const tabelaBody = document.querySelector("#tabelaEventos tbody");
 
   const campoEventoId = document.getElementById("eventoId");
+  const campoCodigo = document.getElementById("codigo");
   const formTituloModo = document.getElementById("formTituloModo");
   const btnSalvar = document.getElementById("btnSalvar");
   const btnCancelarEdicao = document.getElementById("btnCancelarEdicao");
@@ -351,6 +352,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     form.reset();
     if (campoEventoId) campoEventoId.value = "";
+    if (campoCodigo) campoCodigo.value = "";
     eventoEmEdicaoId = null;
 
     if (novasFotosPreview) novasFotosPreview.innerHTML = "";
@@ -394,6 +396,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (participante) participante.value = ev.participante || "";
     if (pauta) pauta.value = ev.pauta || "";
     if (comentario) comentario.value = ev.comentario || "";
+    if (campoCodigo) campoCodigo.value =
+      ev.idSequencial !== undefined && ev.idSequencial !== null
+        ? ev.idSequencial
+        : "";
   }
 
   // ========= Buscar fotos de um evento (para PDF) =========
@@ -547,6 +553,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const dataFimInput = campoDataFim ? campoDataFim.value : "";
       const dataFim = dataFimInput || dataInicio;
 
+      // NÃO inclui idSequencial aqui: ele é gerado apenas na criação
       const docEvento = {
         evento: eventoTipo,
         local: (document.getElementById("local")?.value || "").trim(),
@@ -569,15 +576,42 @@ document.addEventListener("DOMContentLoaded", () => {
         toggleFormDisabled(true);
 
         let idEvento;
+        let novoIdSequencial = null;
 
         if (eventoEmEdicaoId) {
+          // EDIÇÃO: não mexe no idSequencial
           idEvento = eventoEmEdicaoId;
           await db.collection("eventos").doc(idEvento).update(docEvento);
         } else {
+          // CRIAÇÃO: gera idSequencial fixo (incremental)
+          const ultimoSnap = await db
+            .collection("eventos")
+            .orderBy("idSequencial", "desc")
+            .limit(1)
+            .get();
+
+          let ultimoId = 0;
+          if (!ultimoSnap.empty) {
+            const dadosUltimo = ultimoSnap.docs[0].data();
+            if (
+              dadosUltimo.idSequencial !== undefined &&
+              dadosUltimo.idSequencial !== null
+            ) {
+              ultimoId = Number(dadosUltimo.idSequencial) || 0;
+            }
+          }
+
+          novoIdSequencial = ultimoId + 1;
+
+          docEvento.idSequencial = novoIdSequencial;
           docEvento.criadoEm =
             firebase.firestore.FieldValue.serverTimestamp();
+
           const docRef = await db.collection("eventos").add(docEvento);
           idEvento = docRef.id;
+
+          // exibe o código gerado imediatamente no campo (caso ainda esteja na tela)
+          if (campoCodigo) campoCodigo.value = novoIdSequencial;
         }
 
         // Upload novas fotos em base64 (com conversão HEIC -> JPG)
@@ -641,7 +675,9 @@ document.addEventListener("DOMContentLoaded", () => {
     eventosCache = [];
 
     try {
-      let query = db.collection("eventos").orderBy("dataInicio", "asc");
+      let query = db
+        .collection("eventos")
+        .orderBy("dataInicio", "asc");
 
       const de = filtroDe?.value;
       const ate = filtroAte?.value;
@@ -672,7 +708,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!eventosCache.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 11; // agora temos uma coluna extra de ID
+      td.colSpan = 11; // agora temos coluna extra de ID
       td.textContent =
         "Nenhum evento encontrado para o filtro selecionado.";
       tr.appendChild(td);
@@ -820,7 +856,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
-    doc.text("ID", col.idx, y); // era "#"
+    doc.text("ID", col.idx, y);
     doc.text("Data", col.data, y);
     doc.text("Tipo", col.tipo, y);
     doc.text("Local", col.local, y);
@@ -1041,7 +1077,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const cabecalhoSimples = () => {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
-      doc.text("ID", 10, y); // era "#"
+      doc.text("ID", 10, y);
       doc.text("Data", 18, y);
       doc.text("Evento / Local", 40, y);
       doc.text("Comentário", 125, y);
