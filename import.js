@@ -1,4 +1,5 @@
 // import.js - cria documentos de eventos a partir de AGENDA_SEED no Firestore
+// Agora com idSequencial: mais novo = 1, mais antigo = último
 
 (function () {
   const db = firebase.firestore();
@@ -36,22 +37,51 @@
         AGENDA_SEED.length
     );
 
+    // 🔹 1) Ordenar do mais novo para o mais antigo usando dataInicio
+    const eventosOrdenados = [...AGENDA_SEED].sort((a, b) => {
+      const ta = a.dataInicio ? new Date(a.dataInicio).getTime() : 0;
+      const tb = b.dataInicio ? new Date(b.dataInicio).getTime() : 0;
+      // mais novo primeiro
+      return tb - ta;
+    });
+
     let count = 0;
-    for (const ev of AGENDA_SEED) {
+    for (const ev of eventosOrdenados) {
       count++;
 
+      // 🔹 2) Gerar ID sequencial: mais novo = 1, mais antigo = total
+      const idSequencial = count;
+
       if (dryRun) {
-        log("Simulando registro " + count + ": " + (ev.dataInicio || "") + " - " + (ev.evento || ""));
+        log(
+          "Simulando registro " +
+            count +
+            " (idSequencial=" +
+            idSequencial +
+            "): " +
+            (ev.dataInicio || "") +
+            " - " +
+            (ev.evento || "")
+        );
         continue;
       }
 
       try {
         await db.collection("eventos").add({
           ...ev,
+          idSequencial: idSequencial, // 🔹 3) ID numérico gravado no Firestore
           criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
           atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
         });
-        log("Importado " + count + "/" + AGENDA_SEED.length);
+        log(
+          "Importado " +
+            count +
+            "/" +
+            eventosOrdenados.length +
+            " (idSequencial=" +
+            idSequencial +
+            ")"
+        );
       } catch (err) {
         console.error(err);
         log("ERRO no registro " + count + ": " + err.message);
