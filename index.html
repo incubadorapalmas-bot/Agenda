@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="pt-BR" data-theme="light">
-
 <head>
   <meta charset="UTF-8" />
   <title>Agenda Incubadora IFPR / PMP</title>
@@ -74,10 +73,16 @@
       <form id="eventoForm">
         <input type="hidden" id="eventoId" />
 
-         <div class="campo">
-            <label for="codigo">Código</label>
-            <input type="number" id="codigo" />
-          </div>
+        <div class="campo">
+          <label for="codigo">Código</label>
+          <input
+            type="number"
+            id="codigo"
+            min="1"
+            step="1"
+          />
+          <small>Use este código para referência rápida ao evento.</small>
+        </div>
 
         <div class="linha">
           <div class="campo">
@@ -93,9 +98,6 @@
               <option>Outro</option>
             </select>
           </div>
-
-         
-
 
           <div class="campo">
             <label for="local">Local</label>
@@ -236,5 +238,4 @@
     Agenda Incubadora IFPR / PMP — Firebase Firestore
   </footer>
 </body>
-
 </html>
