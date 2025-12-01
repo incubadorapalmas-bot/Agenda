@@ -111,7 +111,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const tabelaBody = document.querySelector("#tabelaEventos tbody");
 
   const campoEventoId = document.getElementById("eventoId");
-  const campoCodigo = document.getElementById("codigo");
+  const campoCodigo = document.getElementById("codigo"); // <-- campo Código na tela
   const formTituloModo = document.getElementById("formTituloModo");
   const btnSalvar = document.getElementById("btnSalvar");
   const btnCancelarEdicao = document.getElementById("btnCancelarEdicao");
@@ -352,7 +352,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     form.reset();
     if (campoEventoId) campoEventoId.value = "";
-    if (campoCodigo) campoCodigo.value = "";
+    if (campoCodigo) campoCodigo.value = ""; // limpa código na tela
     eventoEmEdicaoId = null;
 
     if (novasFotosPreview) novasFotosPreview.innerHTML = "";
@@ -385,6 +385,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const pauta = byId("pauta");
     const comentario = byId("comentario");
 
+    if (campoCodigo) {
+      // mostra código fixo se existir
+      const cod =
+        ev.codigo !== undefined && ev.codigo !== null
+          ? ev.codigo
+          : ev.idSequencial !== undefined && ev.idSequencial !== null
+          ? ev.idSequencial
+          : "";
+      campoCodigo.value = cod;
+    }
+
     if (evento) evento.value = ev.evento || "";
     if (local) local.value = ev.local || "";
     if (endereco) endereco.value = ev.endereco || "";
@@ -396,10 +407,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (participante) participante.value = ev.participante || "";
     if (pauta) pauta.value = ev.pauta || "";
     if (comentario) comentario.value = ev.comentario || "";
-    if (campoCodigo) campoCodigo.value =
-      ev.idSequencial !== undefined && ev.idSequencial !== null
-        ? ev.idSequencial
-        : "";
   }
 
   // ========= Buscar fotos de um evento (para PDF) =========
@@ -502,8 +509,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function abrirEdicaoEvento(idEvento) {
     try {
-      const evCache = eventosCache.find((e) => e.id === idEvento);
-      let ev = evCache;
+      let ev = eventosCache.find((e) => e.id === idEvento);
 
       if (!ev) {
         const doc = await db.collection("eventos").doc(idEvento).get();
@@ -512,6 +518,14 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
         ev = { id: doc.id, ...doc.data() };
+
+        // tenta puxar código da cache, se existir lá
+        const cacheEv = eventosCache.find((e) => e.id === idEvento);
+        if (cacheEv) {
+          if (cacheEv.codigo !== undefined) ev.codigo = cacheEv.codigo;
+          if (cacheEv.idSequencial !== undefined)
+            ev.idSequencial = cacheEv.idSequencial;
+        }
       }
 
       eventoEmEdicaoId = idEvento;
@@ -553,7 +567,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const dataFimInput = campoDataFim ? campoDataFim.value : "";
       const dataFim = dataFimInput || dataInicio;
 
-      // NÃO inclui idSequencial aqui: ele é gerado apenas na criação
       const docEvento = {
         evento: eventoTipo,
         local: (document.getElementById("local")?.value || "").trim(),
@@ -576,42 +589,44 @@ document.addEventListener("DOMContentLoaded", () => {
         toggleFormDisabled(true);
 
         let idEvento;
-        let novoIdSequencial = null;
 
         if (eventoEmEdicaoId) {
-          // EDIÇÃO: não mexe no idSequencial
+          // ATUALIZA: não mexe em "codigo" para manter ID fixo
           idEvento = eventoEmEdicaoId;
           await db.collection("eventos").doc(idEvento).update(docEvento);
         } else {
-          // CRIAÇÃO: gera idSequencial fixo (incremental)
-          const ultimoSnap = await db
-            .collection("eventos")
-            .orderBy("idSequencial", "desc")
-            .limit(1)
-            .get();
+          // CRIA: define próximo código numérico fixo
+          let proximoCodigo = 1;
+          try {
+            const ultimoSnap = await db
+              .collection("eventos")
+              .orderBy("codigo", "desc")
+              .limit(1)
+              .get();
 
-          let ultimoId = 0;
-          if (!ultimoSnap.empty) {
-            const dadosUltimo = ultimoSnap.docs[0].data();
-            if (
-              dadosUltimo.idSequencial !== undefined &&
-              dadosUltimo.idSequencial !== null
-            ) {
-              ultimoId = Number(dadosUltimo.idSequencial) || 0;
+            if (!ultimoSnap.empty) {
+              const ultimo = ultimoSnap.docs[0].data();
+              if (
+                ultimo.codigo !== undefined &&
+                ultimo.codigo !== null &&
+                typeof ultimo.codigo === "number"
+              ) {
+                proximoCodigo = ultimo.codigo + 1;
+              }
             }
+          } catch (errCod) {
+            console.warn(
+              "Não foi possível calcular próximo código via Firestore, usando 1 como fallback.",
+              errCod
+            );
           }
 
-          novoIdSequencial = ultimoId + 1;
-
-          docEvento.idSequencial = novoIdSequencial;
+          docEvento.codigo = proximoCodigo;
           docEvento.criadoEm =
             firebase.firestore.FieldValue.serverTimestamp();
 
           const docRef = await db.collection("eventos").add(docEvento);
           idEvento = docRef.id;
-
-          // exibe o código gerado imediatamente no campo (caso ainda esteja na tela)
-          if (campoCodigo) campoCodigo.value = novoIdSequencial;
         }
 
         // Upload novas fotos em base64 (com conversão HEIC -> JPG)
@@ -675,9 +690,7 @@ document.addEventListener("DOMContentLoaded", () => {
     eventosCache = [];
 
     try {
-      let query = db
-        .collection("eventos")
-        .orderBy("dataInicio", "asc");
+      let query = db.collection("eventos").orderBy("dataInicio", "asc");
 
       const de = filtroDe?.value;
       const ate = filtroAte?.value;
@@ -708,7 +721,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!eventosCache.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 11; // agora temos coluna extra de ID
+      td.colSpan = 11; // 11 colunas (ID + 9 campos + ações)
       td.textContent =
         "Nenhum evento encontrado para o filtro selecionado.";
       tr.appendChild(td);
@@ -725,8 +738,11 @@ document.addEventListener("DOMContentLoaded", () => {
         (ev.horaInicio || ev.horaFim ? " - " : "") +
         (ev.horaFim || "");
 
+      // ID fixo: primeiro tenta 'codigo', depois 'idSequencial', por fim index+1
       const displayId =
-        ev.idSequencial !== undefined && ev.idSequencial !== null
+        ev.codigo !== undefined && ev.codigo !== null
+          ? ev.codigo
+          : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
           : index + 1;
 
@@ -889,7 +905,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const eventTop = y;
 
       const displayId =
-        ev.idSequencial !== undefined && ev.idSequencial !== null
+        ev.codigo !== undefined && ev.codigo !== null
+          ? ev.codigo
+          : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
           : index + 1;
 
@@ -1103,7 +1121,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const eventTop = y;
 
       const displayId =
-        ev.idSequencial !== undefined && ev.idSequencial !== null
+        ev.codigo !== undefined && ev.codigo !== null
+          ? ev.codigo
+          : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
           : index + 1;
 
@@ -1252,6 +1272,20 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const ev = docRef.data();
+
+      // tenta descobrir o código via cache ou documento
+      const cacheEv = eventosCache.find((e) => e.id === idEvento);
+      const codigoEvento =
+        (cacheEv && cacheEv.codigo !== undefined && cacheEv.codigo !== null
+          ? cacheEv.codigo
+          : null) ??
+        (ev.codigo !== undefined && ev.codigo !== null ? ev.codigo : null) ??
+        (cacheEv &&
+        cacheEv.idSequencial !== undefined &&
+        cacheEv.idSequencial !== null
+          ? cacheEv.idSequencial
+          : null);
+
       const fotosSnap = await db
         .collection("eventos")
         .doc(idEvento)
@@ -1267,9 +1301,7 @@ document.addEventListener("DOMContentLoaded", () => {
       let y = 18;
 
       const infos = [
-        ev.idSequencial
-          ? `ID do evento: ${ev.idSequencial}`
-          : null,
+        codigoEvento != null ? `ID do evento: ${codigoEvento}` : null,
         `Evento: ${ev.evento || ""}`,
         `Data: ${ev.dataInicio || ""}${
           ev.dataFim && ev.dataFim !== ev.dataInicio
