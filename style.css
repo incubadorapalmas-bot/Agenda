@@ -272,6 +272,7 @@ label {
 input[type="text"],
 input[type="date"],
 input[type="time"],
+input[type="number"],
 select,
 textarea {
   border-radius: 0.7rem;
@@ -287,6 +288,7 @@ textarea {
 html[data-theme="dark"] input[type="text"],
 html[data-theme="dark"] input[type="date"],
 html[data-theme="dark"] input[type="time"],
+html[data-theme="dark"] input[type="number"],
 html[data-theme="dark"] select,
 html[data-theme="dark"] textarea {
   background: rgba(15, 23, 42, 0.92);
@@ -476,6 +478,16 @@ thead th {
   border-bottom: 1px solid rgba(148, 163, 184, 0.45);
 }
 
+/* Coluna de ID: estreita e alinhada */
+thead th:first-child,
+tbody td:first-child {
+  width: 56px;
+  max-width: 56px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Corpo da tabela */
 tbody tr {
   border-top: 1px solid rgba(148, 163, 184, 0.32);
   cursor: pointer;
