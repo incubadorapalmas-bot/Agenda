@@ -385,14 +385,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const pauta = byId("pauta");
     const comentario = byId("comentario");
 
-    // ID fixo: 'codigo', 'idSequencial' ou, por último, o id do documento
+    // 🔢 ID do relatório: APENAS o que você configurar
+    // prioridade: codigo -> idSequencial -> (vazio)
     if (campoCodigo) {
       const cod =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : ev.id || "";
+          : "";
       campoCodigo.value = cod;
     }
 
@@ -738,13 +739,13 @@ document.addEventListener("DOMContentLoaded", () => {
         (ev.horaInicio || ev.horaFim ? " - " : "") +
         (ev.horaFim || "");
 
-      // ID fixo: 'codigo', 'idSequencial' ou id do documento
+      // 🔢 ID do relatório na tabela: só seu número
       const displayId =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : ev.id || "";
+          : "";
 
       tr.innerHTML = `
         <td>${displayId}</td>
@@ -904,12 +905,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const eventTop = y;
 
+      // ID só seu (codigo / idSequencial)
       const displayId =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : ev.id || "";
+          : "";
 
       const dataEv = ev.dataInicio || "";
       const tipoEv = ev.evento || "";
@@ -1125,7 +1127,7 @@ document.addEventListener("DOMContentLoaded", () => {
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : ev.id || "";
+          : "";
 
       const dataEv = ev.dataInicio || "";
       const linhaEvento = `${ev.evento || ""}${
@@ -1273,7 +1275,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const ev = docRef.data();
 
-      // tenta descobrir o código via cache ou documento, caindo pro idEvento se nada existir
+      // ID do relatório no PDF do evento: só seu número
       const cacheEv = eventosCache.find((e) => e.id === idEvento);
       const codigoEvento =
         (cacheEv &&
@@ -1287,7 +1289,7 @@ document.addEventListener("DOMContentLoaded", () => {
         cacheEv.idSequencial !== null
           ? cacheEv.idSequencial
           : null) ??
-        idEvento;
+        null;
 
       const fotosSnap = await db
         .collection("eventos")
