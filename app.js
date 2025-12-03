@@ -65,20 +65,6 @@ async function renumerarEventosCodigoSequencial() {
   }
 }
 
-// ======== EXECUTAR MIGRAÇÃO AUTOMÁTICA UMA VEZ POR NAVEGADOR ========
-try {
-  if (!localStorage.getItem("agenda_migracao_codigos_v1")) {
-    renumerarEventosCodigoSequencial()
-      .then(() => {
-        localStorage.setItem("agenda_migracao_codigos_v1", "ok");
-      })
-      .catch((err) => {
-        console.error("Falha na migração de códigos (auto)", err);
-      });
-  }
-} catch (e) {
-  console.warn("Não foi possível usar localStorage para controle da migração.", e);
-}
 
   // ========= CONSTANTE DO CDN DO HEIC2ANY =========
   const HEIC2ANY_SRC =
@@ -411,7 +397,7 @@ try {
 
     form.reset();
     if (campoEventoId) campoEventoId.value = "";
-    if (campoCodigo) campoCodigo.value = ""; // limpa código na tela
+    if (campoCodigo) { campoCodigo.value = ""; campoCodigo.readOnly = false; } // limpa código na tela
     eventoEmEdicaoId = null;
 
     if (novasFotosPreview) novasFotosPreview.innerHTML = "";
@@ -454,6 +440,8 @@ try {
           ? ev.idSequencial
           : "";
       campoCodigo.value = cod;
+      // quando carregar um evento existente, o código vem do banco e fica travado
+      campoCodigo.readOnly = true;
     }
 
     if (evento) evento.value = ev.evento || "";
