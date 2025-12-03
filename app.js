@@ -111,7 +111,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const tabelaBody = document.querySelector("#tabelaEventos tbody");
 
   const campoEventoId = document.getElementById("eventoId");
-  const campoCodigo = document.getElementById("codigo"); // <-- campo Código na tela
+  const campoCodigo = document.getElementById("codigo"); // campo Código na tela
   const formTituloModo = document.getElementById("formTituloModo");
   const btnSalvar = document.getElementById("btnSalvar");
   const btnCancelarEdicao = document.getElementById("btnCancelarEdicao");
@@ -385,14 +385,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const pauta = byId("pauta");
     const comentario = byId("comentario");
 
-    // ID fixo: só usa o que estiver salvo no Firestore
+    // ID fixo: 'codigo', 'idSequencial' ou, por último, o id do documento
     if (campoCodigo) {
       const cod =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : "";
+          : ev.id || "";
       campoCodigo.value = cod;
     }
 
@@ -729,7 +729,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    eventosCache.forEach((ev, index) => {
+    eventosCache.forEach((ev) => {
       const tr = document.createElement("tr");
       tr.dataset.id = ev.id;
 
@@ -738,13 +738,13 @@ document.addEventListener("DOMContentLoaded", () => {
         (ev.horaInicio || ev.horaFim ? " - " : "") +
         (ev.horaFim || "");
 
-      // ID fixo: tenta 'codigo', depois 'idSequencial', NUNCA index+1
+      // ID fixo: 'codigo', 'idSequencial' ou id do documento
       const displayId =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : "";
+          : ev.id || "";
 
       tr.innerHTML = `
         <td>${displayId}</td>
@@ -909,7 +909,7 @@ document.addEventListener("DOMContentLoaded", () => {
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : "";
+          : ev.id || "";
 
       const dataEv = ev.dataInicio || "";
       const tipoEv = ev.evento || "";
@@ -1125,7 +1125,7 @@ document.addEventListener("DOMContentLoaded", () => {
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : "";
+          : ev.id || "";
 
       const dataEv = ev.dataInicio || "";
       const linhaEvento = `${ev.evento || ""}${
@@ -1273,7 +1273,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const ev = docRef.data();
 
-      // tenta descobrir o código via cache ou documento
+      // tenta descobrir o código via cache ou documento, caindo pro idEvento se nada existir
       const cacheEv = eventosCache.find((e) => e.id === idEvento);
       const codigoEvento =
         (cacheEv &&
@@ -1286,7 +1286,8 @@ document.addEventListener("DOMContentLoaded", () => {
         cacheEv.idSequencial !== undefined &&
         cacheEv.idSequencial !== null
           ? cacheEv.idSequencial
-          : null);
+          : null) ??
+        idEvento;
 
       const fotosSnap = await db
         .collection("eventos")
