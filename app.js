@@ -21,6 +21,51 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   const db = firebase.firestore();
 
+
+  // ======== MIGRAÇÃO: renumerar eventos de 1 até N (mais novo = 1) ========
+async function renumerarEventosCodigoSequencial() {
+  try {
+    console.log("Iniciando renumeração dos eventos...");
+
+    // Busca TODOS os eventos, do mais recente para o mais antigo
+    const snap = await db
+      .collection("eventos")
+      .orderBy("dataInicio", "desc")
+      .get();
+
+    if (snap.empty) {
+      console.log("Nenhum evento encontrado para renumerar.");
+      return;
+    }
+
+    let codigo = 1;
+    const batch = db.batch();
+
+    snap.forEach((doc) => {
+      // aqui você pode logar pra conferir se quiser
+      console.log("Atribuindo codigo", codigo, "para doc id:", doc.id);
+      batch.update(doc.ref, { codigo: codigo });
+      codigo++;
+    });
+
+    await batch.commit();
+    console.log("Renumeração concluída com sucesso! Total:", codigo - 1);
+
+    alert(
+      "Renumeração concluída.\n" +
+        "Os eventos foram numerados de 1 até " +
+        (codigo - 1) +
+        " (mais recente = 1, mais antigo = " +
+        (codigo - 1) +
+        ")."
+    );
+  } catch (err) {
+    console.error("Erro ao renumerar eventos:", err);
+    alert("Erro ao renumerar eventos. Veja o console (F12).");
+  }
+}
+
+
   // ========= CONSTANTE DO CDN DO HEIC2ANY =========
   const HEIC2ANY_SRC =
     "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js";
