@@ -238,13 +238,12 @@ document.addEventListener("DOMContentLoaded", () => {
             processBlob(blob);
           })
           .catch((err) => {
-            console.error(
-              "Erro ao converter HEIC para JPG, usando fallback com HEIC original:",
-              err
+            console.error("Erro ao converter HEIC para JPG:", err);
+            reject(
+              new Error(
+                "Falha ao converter imagem HEIC para JPG. Tente exportar a foto como JPG no celular."
+              )
             );
-            // Fallback: tenta processar o próprio arquivo HEIC
-            // (como era antes — se o navegador suportar HEIC, funciona)
-            processBlob(file);
           });
 
         return; // importante: não continuar aqui
@@ -386,14 +385,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const pauta = byId("pauta");
     const comentario = byId("comentario");
 
-    // 🔴 AQUI É O PONTO CRÍTICO PRO CÓDIGO
+    // ID fixo: só usa o que estiver salvo no Firestore
     if (campoCodigo) {
       const cod =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : ""; // se não tiver nenhum, fica vazio
+          : "";
       campoCodigo.value = cod;
     }
 
@@ -739,13 +738,13 @@ document.addEventListener("DOMContentLoaded", () => {
         (ev.horaInicio || ev.horaFim ? " - " : "") +
         (ev.horaFim || "");
 
-      // ID fixo: primeiro tenta 'codigo', depois 'idSequencial', por fim index+1
+      // ID fixo: tenta 'codigo', depois 'idSequencial', NUNCA index+1
       const displayId =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : index + 1;
+          : "";
 
       tr.innerHTML = `
         <td>${displayId}</td>
@@ -910,7 +909,7 @@ document.addEventListener("DOMContentLoaded", () => {
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : index + 1;
+          : "";
 
       const dataEv = ev.dataInicio || "";
       const tipoEv = ev.evento || "";
@@ -1126,7 +1125,7 @@ document.addEventListener("DOMContentLoaded", () => {
           ? ev.codigo
           : ev.idSequencial !== undefined && ev.idSequencial !== null
           ? ev.idSequencial
-          : index + 1;
+          : "";
 
       const dataEv = ev.dataInicio || "";
       const linhaEvento = `${ev.evento || ""}${
@@ -1277,7 +1276,9 @@ document.addEventListener("DOMContentLoaded", () => {
       // tenta descobrir o código via cache ou documento
       const cacheEv = eventosCache.find((e) => e.id === idEvento);
       const codigoEvento =
-        (cacheEv && cacheEv.codigo !== undefined && cacheEv.codigo !== null
+        (cacheEv &&
+        cacheEv.codigo !== undefined &&
+        cacheEv.codigo !== null
           ? cacheEv.codigo
           : null) ??
         (ev.codigo !== undefined && ev.codigo !== null ? ev.codigo : null) ??
