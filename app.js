@@ -19,7 +19,17 @@ document.addEventListener("DOMContentLoaded", () => {
       "Firebase Firestore não encontrado. Verifique se os scripts do Firebase foram incluídos corretamente."
     );
   }
-  const db = firebase.firestore();
+
+const db = firebase.firestore();
+
+// ========= Logos para PDFs (carregadas da pasta raiz do projeto) =========
+const logoPmpImg = new Image();
+logoPmpImg.src = "PMP.png";
+const logoIfprImg = new Image();
+logoIfprImg.src = "IFPR.png";
+const logoSebraeImg = new Image();
+logoSebraeImg.src = "Sebrae.png";
+
 
 
   // ======== MIGRAÇÃO: renumerar eventos de 1 até N (mais novo = 1) ========
@@ -865,36 +875,60 @@ async function renumerarEventosCodigoSequencial() {
     return `Período: ${de} até ${ate}`;
   }
 
-  function gerarCabecalhoCorporativo(doc, titulo) {
-    const hoje = new Date();
-    const dataStr = hoje.toLocaleDateString("pt-BR");
-    const horaStr = hoje.toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13);
-    doc.text("INSTITUTO FEDERAL DO PARANÁ - CAMPUS PALMAS", 10, 12);
+function gerarCabecalhoCorporativo(doc, titulo) {
+  const hoje = new Date();
+  const dataStr = hoje.toLocaleDateString("pt-BR");
+  const horaStr = hoje.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
-    doc.setFontSize(11);
-    doc.text(
-      "Incubadora IFPR / Prefeitura Municipal de Palmas",
-      10,
-      18
-    );
+  // Faixa superior
+  doc.setFillColor(5, 30, 45);
+  doc.rect(0, 0, 210, 20, "F");
 
-    doc.setFontSize(10);
-    doc.text(titulo, 10, 24);
-
-    doc.setFont("helvetica", "normal");
-    doc.text(`Emitido em: ${dataStr} às ${horaStr}`, 10, 30);
-    doc.text(obterDescricaoPeriodo(), 10, 35);
-
-    doc.setDrawColor(0, 143, 76);
-    doc.setLineWidth(0.4);
-    doc.line(10, 38, 200, 38);
+  // Logos (se já carregadas)
+  try {
+    if (logoIfprImg && logoIfprImg.complete) {
+      doc.addImage(logoIfprImg, "PNG", 10, 3, 18, 14);
+    }
+    if (logoPmpImg && logoPmpImg.complete) {
+      doc.addImage(logoPmpImg, "PNG", 32, 2.5, 18, 15);
+    }
+    if (logoSebraeImg && logoSebraeImg.complete) {
+      doc.addImage(logoSebraeImg, "PNG", 180, 3, 18, 14);
+    }
+  } catch (e) {
+    // Se não conseguir carregar as logos, apenas segue sem elas
+    console.warn("Não foi possível adicionar alguma logo no cabeçalho do PDF:", e);
   }
+
+  // Títulos
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("INSTITUTO FEDERAL DO PARANÁ - CAMPUS PALMAS", 60, 7);
+
+  doc.setFontSize(9);
+  doc.text("Incubadora IFPR / Prefeitura Municipal de Palmas / Sebrae-PR", 60, 12);
+
+  doc.setFontSize(9);
+  doc.text(titulo, 60, 17);
+
+  // Linha de informações gerais logo abaixo
+  doc.setTextColor(0, 0, 0);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(`Emitido em: ${dataStr} às ${horaStr}`, 10, 27);
+  doc.text(obterDescricaoPeriodo(), 10, 32);
+
+  // Linha divisória
+  doc.setDrawColor(0, 143, 76);
+  doc.setLineWidth(0.5);
+  doc.line(10, 35, 200, 35);
+}
+
 
   // ========= Relatório completo – visão gerencial =========
 
