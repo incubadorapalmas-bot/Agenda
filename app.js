@@ -238,12 +238,13 @@ document.addEventListener("DOMContentLoaded", () => {
             processBlob(blob);
           })
           .catch((err) => {
-            console.error("Erro ao converter HEIC para JPG:", err);
-            reject(
-              new Error(
-                "Falha ao converter imagem HEIC para JPG. Tente exportar a foto como JPG no celular."
-              )
+            console.error(
+              "Erro ao converter HEIC para JPG, usando fallback com HEIC original:",
+              err
             );
+            // Fallback: tenta processar o próprio arquivo HEIC
+            // (como era antes — se o navegador suportar HEIC, funciona)
+            processBlob(file);
           });
 
         return; // importante: não continuar aqui
@@ -369,45 +370,45 @@ document.addEventListener("DOMContentLoaded", () => {
       limparFormulario();
     });
   }
-function preencherFormularioComEvento(ev) {
-  const byId = (id) => document.getElementById(id);
 
-  const evento = byId("evento");
-  const local = byId("local");
-  const endereco = byId("endereco");
-  const dataInicio = byId("dataInicio");
-  const dataFim = byId("dataFim");
-  const horaInicio = byId("horaInicio");
-  const horaFim = byId("horaFim");
-  const formato = byId("formato");
-  const participante = byId("participante");
-  const pauta = byId("pauta");
-  const comentario = byId("comentario");
+  function preencherFormularioComEvento(ev) {
+    const byId = (id) => document.getElementById(id);
 
-  // 🔴 AQUI É O PONTO CRÍTICO PRO CÓDIGO
-  if (campoCodigo) {
-    const cod =
-      ev.codigo !== undefined && ev.codigo !== null
-        ? ev.codigo
-        : ev.idSequencial !== undefined && ev.idSequencial !== null
-        ? ev.idSequencial
-        : ""; // se não tiver nenhum, fica vazio
-    campoCodigo.value = cod;
+    const evento = byId("evento");
+    const local = byId("local");
+    const endereco = byId("endereco");
+    const dataInicio = byId("dataInicio");
+    const dataFim = byId("dataFim");
+    const horaInicio = byId("horaInicio");
+    const horaFim = byId("horaFim");
+    const formato = byId("formato");
+    const participante = byId("participante");
+    const pauta = byId("pauta");
+    const comentario = byId("comentario");
+
+    // 🔴 AQUI É O PONTO CRÍTICO PRO CÓDIGO
+    if (campoCodigo) {
+      const cod =
+        ev.codigo !== undefined && ev.codigo !== null
+          ? ev.codigo
+          : ev.idSequencial !== undefined && ev.idSequencial !== null
+          ? ev.idSequencial
+          : ""; // se não tiver nenhum, fica vazio
+      campoCodigo.value = cod;
+    }
+
+    if (evento) evento.value = ev.evento || "";
+    if (local) local.value = ev.local || "";
+    if (endereco) endereco.value = ev.endereco || "";
+    if (dataInicio) dataInicio.value = ev.dataInicio || "";
+    if (dataFim) dataFim.value = ev.dataFim || ev.dataInicio || "";
+    if (horaInicio) horaInicio.value = ev.horaInicio || "";
+    if (horaFim) horaFim.value = ev.horaFim || "";
+    if (formato) formato.value = ev.formato || "Presencial";
+    if (participante) participante.value = ev.participante || "";
+    if (pauta) pauta.value = ev.pauta || "";
+    if (comentario) comentario.value = ev.comentario || "";
   }
-
-  if (evento) evento.value = ev.evento || "";
-  if (local) local.value = ev.local || "";
-  if (endereco) endereco.value = ev.endereco || "";
-  if (dataInicio) dataInicio.value = ev.dataInicio || "";
-  if (dataFim) dataFim.value = ev.dataFim || ev.dataInicio || "";
-  if (horaInicio) horaInicio.value = ev.horaInicio || "";
-  if (horaFim) horaFim.value = ev.horaFim || "";
-  if (formato) formato.value = ev.formato || "Presencial";
-  if (participante) participante.value = ev.participante || "";
-  if (pauta) pauta.value = ev.pauta || "";
-  if (comentario) comentario.value = ev.comentario || "";
-}
-
 
   // ========= Buscar fotos de um evento (para PDF) =========
 
