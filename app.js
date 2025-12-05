@@ -1,14 +1,12 @@
 // app.js - Agenda Incubadora IFPR/PMP
-// Versão ajustada: corrige ordem de carregamento (ids invertidos) e torna o tratamento HEIC/HEIF mais robusto.
-// Principais mudanças:
-// - carregarEventos(): agora traz por padrão os eventos mais recentes primeiro (order 'desc') para manter
-//   consistência com a renumeração (mais novo = 1).
-// - ensureHeic2any(): carregamento mais tolerante do script do heic2any (jsDelivr, detecção de default).
-// - fileToCompressedDataUrl(): tratamento de fallback mais resiliente ao converter HEIC; tenta conversão,
-//   e em caso de falha faz fallback para leitura direta (base64) com log/alert mais amigável.
-// - renumerarEventosCodigoSequencial(): commit em batches (limite Firestore) para evitar erro em coleções grandes.
-// - Pequenos logs e mensagens para facilitar debugging no console.
-// Observação: mantém seu fluxo (fotos armazenadas em Firestore como dataUrl base64).
+// Versão final solicitada: lista com a data mais recente primeiro (order desc),
+// mas os códigos (campo `codigo`) são renumerados conforme a data (mais antigo = 1,
+// mais recente = N). Após criar/atualizar evento, o sistema renumera todos os eventos
+// com base na data e recarrega a lista — assim o evento mais recente sempre terá o maior código.
+//
+// Observação: renumeração atualiza todos os documentos e pode consumir muitas gravações em Firestore
+// se você tiver muitos documentos. Use com cuidado no plano gratuito. Se preferir, comente a chamada
+// a renumerarEventosCodigoSequencial() após salvar.
 
 document.addEventListener("DOMContentLoaded", () => {
   // ========= INICIALIZAÇÃO jsPDF (mais robusto) =========
@@ -22,7 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Firestore =========
-  if (!firebase || !firebase.firestore) {
+  if (typeof firebase === "undefined" || !firebase.firestore) {
     console.error(
       "Firebase Firestore não encontrado. Verifique se os scripts do Firebase foram incluídos corretamente."
     );
@@ -38,77 +36,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const logoSebraeImg = new Image();
   logoSebraeImg.src = "Sebrae.png";
 
-  // ======== MIGRAÇÃO: renumerar eventos de 1 até N (mais novo = 1) ========
-  async function renumerarEventosCodigoSequencial() {
-    try {
-      console.log("Iniciando renumeração dos eventos...");
-
-      // Busca TODOS os eventos, do mais recente para o mais antigo
-      const snap = await db
-        .collection("eventos")
-        .orderBy("dataInicio", "desc")
-        .get();
-
-      if (snap.empty) {
-        console.log("Nenhum evento encontrado para renumerar.");
-        return;
-      }
-
-      let codigo = 1;
-      // Firestore batch limita a 500 operações por commit; vamos agrupar por 450 para segurança
-      let batch = db.batch();
-      let ops = 0;
-      let total = 0;
-
-      snap.forEach((doc) => {
-        console.log("Atribuindo codigo", codigo, "para doc id:", doc.id);
-        batch.update(doc.ref, { codigo: codigo });
-        codigo++;
-        ops++;
-        total++;
-
-        if (ops >= 450) {
-          // commit parcial e re-inicia batch
-          batch.commit().catch((err) => {
-            console.error("Erro no commit parcial durante renumeração:", err);
-          });
-          batch = db.batch();
-          ops = 0;
-        }
-      });
-
-      if (ops > 0) {
-        await batch.commit();
-      }
-
-      console.log("Renumeração concluída com sucesso! Total:", codigo - 1);
-
-      alert(
-        "Renumeração concluída.\n" +
-          "Os eventos foram numerados de 1 até " +
-          (codigo - 1) +
-          " (mais recente = 1, mais antigo = " +
-          (codigo - 1) +
-          ")."
-      );
-    } catch (err) {
-      console.error("Erro ao renumerar eventos:", err);
-      alert("Erro ao renumerar eventos. Veja o console (F12).");
-    }
-  }
-
   // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
   const HEIC2ANY_SRC =
     "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js";
 
-  /**
-   * Garante que a função heic2any esteja disponível.
-   * - Se já estiver em window.__heic2anyFn, usa.
-   * - Se estiver em window.heic2any ou window.heic2any.default, usa.
-   * - Se não estiver, injeta o script do CDN e espera carregar.
-   */
   function ensureHeic2any() {
-    // Já cacheado
     if (
       window.__heic2anyFn &&
       typeof window.__heic2anyFn === "function"
@@ -116,7 +48,6 @@ document.addEventListener("DOMContentLoaded", () => {
       return Promise.resolve(window.__heic2anyFn);
     }
 
-    // Já existe global (por script no HTML ou por outra lib)
     if (window.heic2any) {
       const g = window.heic2any;
       const fn =
@@ -128,19 +59,16 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    // Já existe um carregamento em andamento
     if (window.__heic2anyLoading) {
       return window.__heic2anyLoading;
     }
 
-    // Cria novo carregamento
     window.__heic2anyLoading = new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = HEIC2ANY_SRC;
       script.async = true;
 
       script.onload = () => {
-        // Tentativa de detecção robusta
         const g = window.heic2any;
         let fn = null;
         if (typeof g === "function") fn = g;
@@ -163,18 +91,72 @@ document.addEventListener("DOMContentLoaded", () => {
         resolve(fn);
       };
 
-      script.onerror = (e) => {
-        reject(
-          new Error(
-            "Falha ao carregar script heic2any a partir do CDN."
-          )
-        );
+      script.onerror = () => {
+        reject(new Error("Falha ao carregar script heic2any a partir do CDN."));
       };
 
       document.head.appendChild(script);
     });
 
     return window.__heic2anyLoading;
+  }
+
+  // ========= RENUMERAR: ordena por data ASC (mais antigo = 1) =========
+  async function renumerarEventosCodigoSequencial() {
+    try {
+      console.log("Iniciando renumeração dos eventos (mais antigo = codigo 1)...");
+
+      // Busca TODOS os eventos, do mais antigo para o mais recente (asc)
+      const snap = await db
+        .collection("eventos")
+        .orderBy("dataInicio", "asc")
+        .get();
+
+      if (snap.empty) {
+        console.log("Nenhum evento encontrado para renumerar.");
+        return;
+      }
+
+      let codigo = 1;
+      let batch = db.batch();
+      let ops = 0;
+      const commits = [];
+
+      snap.forEach((doc) => {
+        batch.update(doc.ref, { codigo: codigo });
+        codigo++;
+        ops++;
+
+        if (ops >= 450) {
+          // commit parcial e reinicia batch
+          commits.push(
+            batch.commit().catch((err) => {
+              console.error("Erro no commit parcial durante renumeração:", err);
+            })
+          );
+          batch = db.batch();
+          ops = 0;
+        }
+      });
+
+      if (ops > 0) {
+        commits.push(
+          batch.commit().catch((err) => {
+            console.error("Erro no commit final durante renumeração:", err);
+          })
+        );
+      }
+
+      await Promise.all(commits);
+
+      console.log("Renumeração concluída com sucesso! Total:", codigo - 1);
+
+      // Opcional: notificar usuário (pode ser desativado se ficar incômodo)
+      // alert("Renumeração concluída. Eventos numerados de 1 até " + (codigo - 1));
+    } catch (err) {
+      console.error("Erro ao renumerar eventos:", err);
+      alert("Erro ao renumerar eventos. Veja o console (F12).");
+    }
   }
 
   // ========= Referências de elementos =========
@@ -202,7 +184,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const fotosAtuaisWrapper = document.getElementById("fotosAtuaisWrapper");
   const fotosAtuaisDiv = document.getElementById("fotosAtuais");
 
-  // Toggle de tema
   const btnToggleTema =
     document.querySelector(".toggle-tema") ||
     document.getElementById("btnToggleTema");
@@ -224,7 +205,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= THEME TOGGLE (CLARO / ESCURO) =========
-
   (function initTheme() {
     const html = document.documentElement;
     const temaSalvo = localStorage.getItem("agenda_tema") || "light";
@@ -258,15 +238,6 @@ document.addEventListener("DOMContentLoaded", () => {
   })();
 
   // ========= Helpers: compressão de imagem =========
-
-  /**
-   * Converte um File de imagem (JPG/PNG/HEIC) em dataURL JPEG comprimido.
-   * Para HEIC/HEIF usa heic2any para converter em JPG antes de jogar no canvas.
-   *
-   * Retorna Promise<string> com dataURL (image/jpeg). Em caso de falha na conversão HEIC,
-   * tenta fallback de leitura direta como base64 (dataURL) e retorna esse valor (atenção:
-   * alguns navegadores NÃO renderizam HEIC; preferível usar conversão no cliente).
-   */
   function fileToCompressedDataUrl(
     file,
     maxWidth = 1280,
@@ -298,14 +269,11 @@ document.addEventListener("DOMContentLoaded", () => {
               resolve(dataUrl);
             } catch (errCanvas) {
               console.warn("Erro ao desenhar no canvas:", errCanvas);
-              // fallback: se não conseguir desenhar, devolve a leitura direta do blob como dataURL
               resolve(reader.result);
             }
           };
 
           img.onerror = () => {
-            // img.src pode não ser suportado (p.ex. HEIC em alguns navegadores)
-            // Nesse caso devolvemos o dataURL original do blob (pode ser HEIC)
             console.warn(
               "Imagem não pôde ser carregada no <img> (possível HEIC sem suporte)."
             );
@@ -318,11 +286,9 @@ document.addEventListener("DOMContentLoaded", () => {
         reader.readAsDataURL(blob);
       };
 
-      // Se for HEIC/HEIF, garante lib e converte antes
       if (isHeicFile(file)) {
         ensureHeic2any()
           .then((fn) =>
-            // Alguns builds aceitam opção 'toType' e retornam Blob/Array
             fn({
               blob: file,
               toType: "image/jpeg",
@@ -330,7 +296,6 @@ document.addEventListener("DOMContentLoaded", () => {
             })
           )
           .then((convertedBlob) => {
-            // heic2any pode retornar Blob ou Array de Blobs
             const blob =
               convertedBlob instanceof Blob
                 ? convertedBlob
@@ -344,7 +309,6 @@ document.addEventListener("DOMContentLoaded", () => {
           })
           .catch(async (err) => {
             console.error("Erro ao converter HEIC para JPG:", err);
-            // fallback: tentar ler o arquivo original como dataURL (pode não renderizar em alguns browsers)
             try {
               const fr = new FileReader();
               fr.onload = () => {
@@ -371,16 +335,14 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           });
 
-        return; // importante: não continuar aqui
+        return;
       }
 
-      // JPG/PNG/etc: processa direto
       processBlob(file);
     });
   }
 
   // ========= Drag & Drop de fotos =========
-
   if (dropArea && fotosInput) {
     const preventDefaults = (e) => {
       e.preventDefault();
@@ -424,7 +386,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Preview das novas fotos =========
-
   function atualizarPreviewNovasFotos() {
     if (!novasFotosPreview || !fotosInput) return;
 
@@ -465,7 +426,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Helpers de formulário =========
-
   function toggleFormDisabled(flag) {
     if (!form) return;
     const elements = form.querySelectorAll("input, select, textarea, button");
@@ -477,7 +437,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     form.reset();
     if (campoEventoId) campoEventoId.value = "";
-    if (campoCodigo) { campoCodigo.value = ""; campoCodigo.readOnly = false; } // limpa código na tela
+    if (campoCodigo) { campoCodigo.value = ""; campoCodigo.readOnly = false; }
     eventoEmEdicaoId = null;
 
     if (novasFotosPreview) novasFotosPreview.innerHTML = "";
@@ -510,8 +470,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const pauta = byId("pauta");
     const comentario = byId("comentario");
 
-    // 🔢 ID do relatório: APENAS o que você configurar
-    // prioridade: codigo -> idSequencial -> (vazio)
     if (campoCodigo) {
       const cod =
         ev.codigo !== undefined && ev.codigo !== null
@@ -520,7 +478,6 @@ document.addEventListener("DOMContentLoaded", () => {
           ? ev.idSequencial
           : "";
       campoCodigo.value = cod;
-      // quando carregar um evento existente, o código vem do banco e fica travado
       campoCodigo.readOnly = true;
     }
 
@@ -538,7 +495,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Buscar fotos de um evento (para PDF) =========
-
   async function getFotosEvento(idEvento) {
     const fotos = [];
     try {
@@ -561,7 +517,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Fotos de um evento (já salvas) – MOSTRANDO E EXCLUINDO =========
-
   async function carregarFotosDoEvento(idEvento) {
     if (!fotosAtuaisDiv || !fotosAtuaisWrapper) return;
 
@@ -634,7 +589,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Abrir edição =========
-
   async function abrirEdicaoEvento(idEvento) {
     try {
       let ev = eventosCache.find((e) => e.id === idEvento);
@@ -647,7 +601,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         ev = { id: doc.id, ...doc.data() };
 
-        // tenta puxar código da cache, se existir lá
         const cacheEv = eventosCache.find((e) => e.id === idEvento);
         if (cacheEv) {
           if (cacheEv.codigo !== undefined) ev.codigo = cacheEv.codigo;
@@ -676,7 +629,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Salvar (criar/atualizar) evento + fotos =========
-
   if (form) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -719,37 +671,11 @@ document.addEventListener("DOMContentLoaded", () => {
         let idEvento;
 
         if (eventoEmEdicaoId) {
-          // ATUALIZA: não mexe em "codigo" para manter ID fixo
+          // ATUALIZA: atualiza o documento existente
           idEvento = eventoEmEdicaoId;
           await db.collection("eventos").doc(idEvento).update(docEvento);
         } else {
-          // CRIA: define próximo código numérico fixo
-          let proximoCodigo = 1;
-          try {
-            const ultimoSnap = await db
-              .collection("eventos")
-              .orderBy("codigo", "desc")
-              .limit(1)
-              .get();
-
-            if (!ultimoSnap.empty) {
-              const ultimo = ultimoSnap.docs[0].data();
-              if (
-                ultimo.codigo !== undefined &&
-                ultimo.codigo !== null &&
-                typeof ultimo.codigo === "number"
-              ) {
-                proximoCodigo = ultimo.codigo + 1;
-              }
-            }
-          } catch (errCod) {
-            console.warn(
-              "Não foi possível calcular próximo código via Firestore, usando 1 como fallback.",
-              errCod
-            );
-          }
-
-          docEvento.codigo = proximoCodigo;
+          // CRIA: adiciona sem definir 'codigo' aqui (renumeração fará o ajuste)
           docEvento.criadoEm =
             firebase.firestore.FieldValue.serverTimestamp();
 
@@ -789,6 +715,10 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }
 
+        // Agora renumerar todos os eventos conforme a data (mais antigo = 1, mais recente = N)
+        // Assim garantimos que o evento mais recente terá o maior código.
+        await renumerarEventosCodigoSequencial();
+
         alert(
           eventoEmEdicaoId
             ? "Evento atualizado com sucesso!"
@@ -810,7 +740,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Carregar e listar eventos =========
-
   async function carregarEventos() {
     if (!tabelaBody) return;
 
@@ -818,10 +747,10 @@ document.addEventListener("DOMContentLoaded", () => {
     eventosCache = [];
 
     try {
-      // Por padrão traz os eventos mais recentes primeiro (desc) para manter consistência
-      // com a renumeração (mais novo = 1). Se quiser asc, passe ?order=asc na URL (query param).
+      // Por padrão traz os eventos mais recentes primeiro (desc) para exibição
+      // (o campo 'codigo' será tal que o mais recente possui o maior número)
       const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
-      const order = orderParam === "asc" ? "asc" : "desc";
+      const order = orderParam === "asc" ? "asc" : "desc"; // default = desc (mais recente primeiro)
 
       let query = db.collection("eventos").orderBy("dataInicio", order);
 
@@ -839,7 +768,6 @@ document.addEventListener("DOMContentLoaded", () => {
         eventosCache.push({ id, ...ev });
       });
 
-      // Se você preferir sempre apresentar o mais novo primeiro na UI, eventosCache já tem 'desc'
       renderTabela();
     } catch (err) {
       console.error(err);
@@ -855,7 +783,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!eventosCache.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 11; // 11 colunas (ID + 9 campos + ações)
+      td.colSpan = 11;
       td.textContent =
         "Nenhum evento encontrado para o filtro selecionado.";
       tr.appendChild(td);
@@ -872,7 +800,6 @@ document.addEventListener("DOMContentLoaded", () => {
         (ev.horaInicio || ev.horaFim ? " - " : "") +
         (ev.horaFim || "");
 
-      // 🔢 ID do relatório na tabela: só seu número
       const displayId =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
@@ -926,7 +853,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Filtros =========
-
   if (btnFiltrar) {
     btnFiltrar.addEventListener("click", carregarEventos);
   }
@@ -939,7 +865,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // ========= PDFs gerais (com fotos) – ESTILO EMPRESARIAL =========
+  // ========= Funções para PDFs (mantive as suas versões anteriores) =========
 
   function obterDescricaoPeriodo() {
     if (!filtroDe?.value && !filtroAte?.value) {
@@ -959,11 +885,9 @@ document.addEventListener("DOMContentLoaded", () => {
       minute: "2-digit",
     });
 
-    // Faixa superior
     doc.setFillColor(5, 30, 45);
     doc.rect(0, 0, 210, 20, "F");
 
-    // Logos (se já carregadas)
     try {
       if (logoIfprImg && logoIfprImg.complete) {
         doc.addImage(logoIfprImg, "PNG", 10, 3, 18, 14);
@@ -975,11 +899,9 @@ document.addEventListener("DOMContentLoaded", () => {
         doc.addImage(logoSebraeImg, "PNG", 180, 3, 18, 14);
       }
     } catch (e) {
-      // Se não conseguir carregar as logos, apenas segue sem elas
       console.warn("Não foi possível adicionar alguma logo no cabeçalho do PDF:", e);
     }
 
-    // Títulos
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
@@ -991,20 +913,16 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.setFontSize(9);
     doc.text(titulo, 60, 17);
 
-    // Linha de informações gerais logo abaixo
     doc.setTextColor(0, 0, 0);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.text(`Emitido em: ${dataStr} às ${horaStr}`, 10, 27);
     doc.text(obterDescricaoPeriodo(), 10, 32);
 
-    // Linha divisória
     doc.setDrawColor(0, 143, 76);
     doc.setLineWidth(0.5);
     doc.line(10, 35, 200, 35);
   }
-
-  // ========= Relatório completo – visão gerencial =========
 
   async function gerarPdfCompleto() {
     if (!jsPDF) {
@@ -1060,7 +978,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const eventTop = y;
 
-      // ID só seu (codigo / idSequencial)
       const displayId =
         ev.codigo !== undefined && ev.codigo !== null
           ? ev.codigo
@@ -1234,8 +1151,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     doc.save("relatorio-gerencial-eventos-incubadora.pdf");
   }
-
-  // ========= Relatório simplificado =========
 
   async function gerarPdfSimples() {
     if (!jsPDF) {
@@ -1413,8 +1328,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // ========= PDF por evento com fotos =========
-
   async function gerarPdfEventoComFotos(idEvento) {
     if (!jsPDF) {
       alert("jsPDF não foi carregado. Verifique os scripts.");
@@ -1430,7 +1343,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const ev = docRef.data();
 
-      // ID do relatório no PDF do evento: só seu número
       const cacheEv = eventosCache.find((e) => e.id === idEvento);
       const codigoEvento =
         (cacheEv &&
@@ -1536,6 +1448,5 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ========= Inicialização =========
-
   carregarEventos();
 });
