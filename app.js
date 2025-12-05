@@ -38,70 +38,166 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
  // Substitua o bloco que define HEIC2ANY_SRC e a função ensureHeic2any por este:
 
-// ---------- heic2any loader (tenta CDN então local) ----------
+// Lista de fontes conhecidas do heic2any.
+// As três primeiras são CDN que realmente existem; a última é opcional/local.
 const HEIC2ANY_SOURCES = [
-  "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js",
+  // jsDelivr (versão 0.0.4 do heic2any original)
+  "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js",
+  // unpkg (mesma versão)
+  "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js",
+  // cdnjs (versão 0.0.1, também funcional)
+  "https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.1/index.min.js",
+  // opcional: arquivo local se você quiser hospedar em /vendor
   "/vendor/heic2any.min.js"
 ];
 
+// Tenta extrair a função correta do objeto global (várias formas de export)
+function getHeic2anyFromGlobal() {
+  const g = window.heic2any || window.__heic2anyFn;
+
+  if (!g) return null;
+
+  if (typeof g === "function") return g;
+  if (g && typeof g.default === "function") return g.default;
+  if (g && typeof g.heic2any === "function") return g.heic2any;
+
+  return null;
+}
+
 function ensureHeic2any() {
+  // 1) Já temos a função resolvida e cacheada
   if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
     return Promise.resolve(window.__heic2anyFn);
   }
 
-  if (window.heic2any) {
-    const g = window.heic2any;
-    const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
-    if (fn) {
-      window.__heic2anyFn = fn;
-      return Promise.resolve(fn);
-    }
+  // 2) Já existe algo no global (por script carregado antes)
+  const existing = getHeic2anyFromGlobal();
+  if (existing) {
+    window.__heic2anyFn = existing;
+    return Promise.resolve(existing);
   }
 
-  if (window.__heic2anyLoading) return window.__heic2anyLoading;
+  // 3) Já existe um carregamento em andamento? reaproveita a mesma Promise
+  if (window.__heic2anyLoading) {
+    return window.__heic2anyLoading;
+  }
 
+  // 4) Inicia um novo processo de carregamento
   window.__heic2anyLoading = new Promise(async (resolve, reject) => {
     for (const src of HEIC2ANY_SOURCES) {
       try {
-        // if already global (via <script src="/vendor/...">) pick it
-        if (src.startsWith("/") && (window.heic2any || window.__heic2anyFn)) {
-          const g = window.heic2any || window.__heic2anyFn;
-          const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
-          if (fn) { window.__heic2anyFn = fn; resolve(fn); return; }
+        // Se for caminho local ("/vendor/...") e o global já existir,
+        // apenas reaproveita (não precisa injetar script de novo)
+        if (src.startsWith("/") && getHeic2anyFromGlobal()) {
+          const fnLocal = getHeic2anyFromGlobal();
+          if (fnLocal) {
+            window.__heic2anyFn = fnLocal;
+            resolve(fnLocal);
+            return;
+          }
         }
 
-        // dynamically inject script
+        // Carrega o script dinamicamente
         await new Promise((res, rej) => {
           const s = document.createElement("script");
           s.src = src;
           s.async = true;
           s.onload = () => res();
-          s.onerror = () => rej(new Error("failed to load " + src));
+          s.onerror = () => rej(new Error("Falha ao carregar " + src));
           document.head.appendChild(s);
         });
 
-        // check for exported function
-        const g = window.heic2any;
-        const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+        // Depois de carregar, tenta extrair a função do global
+        const fn = getHeic2anyFromGlobal();
         if (fn) {
           window.__heic2anyFn = fn;
           resolve(fn);
           return;
+        } else {
+          console.warn(
+            "[heic2any] Script carregado mas não encontrei export válido em",
+            src
+          );
         }
-        // otherwise continue to next source
       } catch (err) {
-        console.warn("heic2any load failed for", src, err && err.message ? err.message : err);
-        // try next source
+        console.warn(
+          "[heic2any] Falha ao carregar de",
+          src,
+          "-",
+          err && err.message ? err.message : err
+        );
+        // Continua para o próximo src
       }
     }
 
-    // none succeeded
+    // Se chegou aqui, nenhuma fonte funcionou
     delete window.__heic2anyLoading;
-    reject(new Error("Nenhuma fonte heic2any disponível (CDN/local falharam)"));
+    reject(
+      new Error("Nenhuma fonte heic2any disponível (CDNs e /vendor falharam)")
+    );
   });
 
   return window.__heic2anyLoading;
 }
+
+                            function ensureHeic2any() {
+                              if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
+                                return Promise.resolve(window.__heic2anyFn);
+                              }
+
+                              if (window.heic2any) {
+                                const g = window.heic2any;
+                                const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+                                if (fn) {
+                                  window.__heic2anyFn = fn;
+                                  return Promise.resolve(fn);
+                                }
+                              }
+
+                              if (window.__heic2anyLoading) return window.__heic2anyLoading;
+
+                              window.__heic2anyLoading = new Promise(async (resolve, reject) => {
+                                for (const src of HEIC2ANY_SOURCES) {
+                                  try {
+                                    // if already global (via <script src="/vendor/...">) pick it
+                                    if (src.startsWith("/") && (window.heic2any || window.__heic2anyFn)) {
+                                      const g = window.heic2any || window.__heic2anyFn;
+                                      const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+                                      if (fn) { window.__heic2anyFn = fn; resolve(fn); return; }
+                                    }
+
+                                    // dynamically inject script
+                                    await new Promise((res, rej) => {
+                                      const s = document.createElement("script");
+                                      s.src = src;
+                                      s.async = true;
+                                      s.onload = () => res();
+                                      s.onerror = () => rej(new Error("failed to load " + src));
+                                      document.head.appendChild(s);
+                                    });
+
+                                    // check for exported function
+                                    const g = window.heic2any;
+                                    const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+                                    if (fn) {
+                                      window.__heic2anyFn = fn;
+                                      resolve(fn);
+                                      return;
+                                    }
+                                    // otherwise continue to next source
+                                  } catch (err) {
+                                    console.warn("heic2any load failed for", src, err && err.message ? err.message : err);
+                                    // try next source
+                                  }
+                                }
+
+                                // none succeeded
+                                delete window.__heic2anyLoading;
+                                reject(new Error("Nenhuma fonte heic2any disponível (CDN/local falharam)"));
+                              });
+
+                              return window.__heic2anyLoading;
+                            }
 
 // ---------- converter diretamente um File HEIC -> JPEG dataURL ----------
 async function convertHeicFileToJpegDataUrl(file, options = { quality: 0.9 }) {
