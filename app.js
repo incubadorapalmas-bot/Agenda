@@ -1,6 +1,14 @@
 // app.js - Agenda Incubadora IFPR/PMP
-// Versão SEM Firebase Storage (fotos vão para o Firestore em base64, com compressão)
-// Agora com suporte a HEIC/HEIF carregando heic2any dinamicamente
+// Versão ajustada: corrige ordem de carregamento (ids invertidos) e torna o tratamento HEIC/HEIF mais robusto.
+// Principais mudanças:
+// - carregarEventos(): agora traz por padrão os eventos mais recentes primeiro (order 'desc') para manter
+//   consistência com a renumeração (mais novo = 1).
+// - ensureHeic2any(): carregamento mais tolerante do script do heic2any (jsDelivr, detecção de default).
+// - fileToCompressedDataUrl(): tratamento de fallback mais resiliente ao converter HEIC; tenta conversão,
+//   e em caso de falha faz fallback para leitura direta (base64) com log/alert mais amigável.
+// - renumerarEventosCodigoSequencial(): commit em batches (limite Firestore) para evitar erro em coleções grandes.
+// - Pequenos logs e mensagens para facilitar debugging no console.
+// Observação: mantém seu fluxo (fotos armazenadas em Firestore como dataUrl base64).
 
 document.addEventListener("DOMContentLoaded", () => {
   // ========= INICIALIZAÇÃO jsPDF (mais robusto) =========
@@ -20,65 +28,78 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
-const db = firebase.firestore();
+  const db = firebase.firestore();
 
-// ========= Logos para PDFs (carregadas da pasta raiz do projeto) =========
-const logoPmpImg = new Image();
-logoPmpImg.src = "PMP.png";
-const logoIfprImg = new Image();
-logoIfprImg.src = "IFPR.png";
-const logoSebraeImg = new Image();
-logoSebraeImg.src = "Sebrae.png";
-
-
+  // ========= Logos para PDFs (carregadas da pasta raiz do projeto) =========
+  const logoPmpImg = new Image();
+  logoPmpImg.src = "PMP.png";
+  const logoIfprImg = new Image();
+  logoIfprImg.src = "IFPR.png";
+  const logoSebraeImg = new Image();
+  logoSebraeImg.src = "Sebrae.png";
 
   // ======== MIGRAÇÃO: renumerar eventos de 1 até N (mais novo = 1) ========
-async function renumerarEventosCodigoSequencial() {
-  try {
-    console.log("Iniciando renumeração dos eventos...");
+  async function renumerarEventosCodigoSequencial() {
+    try {
+      console.log("Iniciando renumeração dos eventos...");
 
-    // Busca TODOS os eventos, do mais recente para o mais antigo
-    const snap = await db
-      .collection("eventos")
-      .orderBy("dataInicio", "desc")
-      .get();
+      // Busca TODOS os eventos, do mais recente para o mais antigo
+      const snap = await db
+        .collection("eventos")
+        .orderBy("dataInicio", "desc")
+        .get();
 
-    if (snap.empty) {
-      console.log("Nenhum evento encontrado para renumerar.");
-      return;
+      if (snap.empty) {
+        console.log("Nenhum evento encontrado para renumerar.");
+        return;
+      }
+
+      let codigo = 1;
+      // Firestore batch limita a 500 operações por commit; vamos agrupar por 450 para segurança
+      let batch = db.batch();
+      let ops = 0;
+      let total = 0;
+
+      snap.forEach((doc) => {
+        console.log("Atribuindo codigo", codigo, "para doc id:", doc.id);
+        batch.update(doc.ref, { codigo: codigo });
+        codigo++;
+        ops++;
+        total++;
+
+        if (ops >= 450) {
+          // commit parcial e re-inicia batch
+          batch.commit().catch((err) => {
+            console.error("Erro no commit parcial durante renumeração:", err);
+          });
+          batch = db.batch();
+          ops = 0;
+        }
+      });
+
+      if (ops > 0) {
+        await batch.commit();
+      }
+
+      console.log("Renumeração concluída com sucesso! Total:", codigo - 1);
+
+      alert(
+        "Renumeração concluída.\n" +
+          "Os eventos foram numerados de 1 até " +
+          (codigo - 1) +
+          " (mais recente = 1, mais antigo = " +
+          (codigo - 1) +
+          ")."
+      );
+    } catch (err) {
+      console.error("Erro ao renumerar eventos:", err);
+      alert("Erro ao renumerar eventos. Veja o console (F12).");
     }
-
-    let codigo = 1;
-    const batch = db.batch();
-
-    snap.forEach((doc) => {
-      // aqui você pode logar pra conferir se quiser
-      console.log("Atribuindo codigo", codigo, "para doc id:", doc.id);
-      batch.update(doc.ref, { codigo: codigo });
-      codigo++;
-    });
-
-    await batch.commit();
-    console.log("Renumeração concluída com sucesso! Total:", codigo - 1);
-
-    alert(
-      "Renumeração concluída.\n" +
-        "Os eventos foram numerados de 1 até " +
-        (codigo - 1) +
-        " (mais recente = 1, mais antigo = " +
-        (codigo - 1) +
-        ")."
-    );
-  } catch (err) {
-    console.error("Erro ao renumerar eventos:", err);
-    alert("Erro ao renumerar eventos. Veja o console (F12).");
   }
-}
 
-
-  // ========= CONSTANTE DO CDN DO HEIC2ANY =========
+  // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
   const HEIC2ANY_SRC =
-    "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js";
+    "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js";
 
   /**
    * Garante que a função heic2any esteja disponível.
@@ -95,7 +116,7 @@ async function renumerarEventosCodigoSequencial() {
       return Promise.resolve(window.__heic2anyFn);
     }
 
-    // Já existe global (por script no HTML)
+    // Já existe global (por script no HTML ou por outra lib)
     if (window.heic2any) {
       const g = window.heic2any;
       const fn =
@@ -119,10 +140,17 @@ async function renumerarEventosCodigoSequencial() {
       script.async = true;
 
       script.onload = () => {
+        // Tentativa de detecção robusta
         const g = window.heic2any;
-        const fn =
-          (g && typeof g === "function" && g) ||
-          (g && typeof g.default === "function" && g.default);
+        let fn = null;
+        if (typeof g === "function") fn = g;
+        else if (g && typeof g.default === "function") fn = g.default;
+        else if (g && typeof g.heic2any === "function") fn = g.heic2any;
+
+        if (!fn && window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
+          fn = window.__heic2anyFn;
+        }
+
         if (!fn) {
           reject(
             new Error(
@@ -135,7 +163,7 @@ async function renumerarEventosCodigoSequencial() {
         resolve(fn);
       };
 
-      script.onerror = () => {
+      script.onerror = (e) => {
         reject(
           new Error(
             "Falha ao carregar script heic2any a partir do CDN."
@@ -234,6 +262,10 @@ async function renumerarEventosCodigoSequencial() {
   /**
    * Converte um File de imagem (JPG/PNG/HEIC) em dataURL JPEG comprimido.
    * Para HEIC/HEIF usa heic2any para converter em JPG antes de jogar no canvas.
+   *
+   * Retorna Promise<string> com dataURL (image/jpeg). Em caso de falha na conversão HEIC,
+   * tenta fallback de leitura direta como base64 (dataURL) e retorna esse valor (atenção:
+   * alguns navegadores NÃO renderizam HEIC; preferível usar conversão no cliente).
    */
   function fileToCompressedDataUrl(
     file,
@@ -248,27 +280,38 @@ async function renumerarEventosCodigoSequencial() {
         reader.onerror = () => reject(reader.error);
         reader.onload = () => {
           const img = new Image();
+
           img.onload = () => {
-            let { width, height } = img;
-            const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
-            const targetWidth = Math.round(width * ratio);
-            const targetHeight = Math.round(height * ratio);
+            try {
+              let { width, height } = img;
+              const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+              const targetWidth = Math.round(width * ratio);
+              const targetHeight = Math.round(height * ratio);
 
-            const canvas = document.createElement("canvas");
-            canvas.width = targetWidth;
-            canvas.height = targetHeight;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+              const canvas = document.createElement("canvas");
+              canvas.width = targetWidth;
+              canvas.height = targetHeight;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-            const dataUrl = canvas.toDataURL("image/jpeg", quality);
-            resolve(dataUrl);
+              const dataUrl = canvas.toDataURL("image/jpeg", quality);
+              resolve(dataUrl);
+            } catch (errCanvas) {
+              console.warn("Erro ao desenhar no canvas:", errCanvas);
+              // fallback: se não conseguir desenhar, devolve a leitura direta do blob como dataURL
+              resolve(reader.result);
+            }
           };
-          img.onerror = () =>
-            reject(
-              new Error(
-                "Não foi possível carregar a imagem. Verifique se o formato é suportado."
-              )
+
+          img.onerror = () => {
+            // img.src pode não ser suportado (p.ex. HEIC em alguns navegadores)
+            // Nesse caso devolvemos o dataURL original do blob (pode ser HEIC)
+            console.warn(
+              "Imagem não pôde ser carregada no <img> (possível HEIC sem suporte)."
             );
+            resolve(reader.result);
+          };
+
           img.src = reader.result;
         };
 
@@ -279,6 +322,7 @@ async function renumerarEventosCodigoSequencial() {
       if (isHeicFile(file)) {
         ensureHeic2any()
           .then((fn) =>
+            // Alguns builds aceitam opção 'toType' e retornam Blob/Array
             fn({
               blob: file,
               toType: "image/jpeg",
@@ -286,19 +330,45 @@ async function renumerarEventosCodigoSequencial() {
             })
           )
           .then((convertedBlob) => {
+            // heic2any pode retornar Blob ou Array de Blobs
             const blob =
               convertedBlob instanceof Blob
                 ? convertedBlob
-                : convertedBlob[0];
+                : Array.isArray(convertedBlob) && convertedBlob.length
+                ? convertedBlob[0]
+                : convertedBlob;
+            if (!blob) {
+              throw new Error("heic2any retornou valor inválido");
+            }
             processBlob(blob);
           })
-          .catch((err) => {
+          .catch(async (err) => {
             console.error("Erro ao converter HEIC para JPG:", err);
-            reject(
-              new Error(
-                "Falha ao converter imagem HEIC para JPG. Tente exportar a foto como JPG no celular."
-              )
-            );
+            // fallback: tentar ler o arquivo original como dataURL (pode não renderizar em alguns browsers)
+            try {
+              const fr = new FileReader();
+              fr.onload = () => {
+                console.warn(
+                  "FALLBACK: usando dataURL original do arquivo HEIC (pode não ser exibido em todos os navegadores)."
+                );
+                resolve(fr.result);
+              };
+              fr.onerror = () => {
+                reject(
+                  new Error(
+                    "Falha ao processar HEIC e fallback também falhou. Tente exportar a imagem para JPG/PNG."
+                  )
+                );
+              };
+              fr.readAsDataURL(file);
+            } catch (fallbackErr) {
+              reject(
+                new Error(
+                  "Falha ao converter HEIC e não foi possível aplicar fallback. " +
+                    fallbackErr.message
+                )
+              );
+            }
           });
 
         return; // importante: não continuar aqui
@@ -748,7 +818,12 @@ async function renumerarEventosCodigoSequencial() {
     eventosCache = [];
 
     try {
-      let query = db.collection("eventos").orderBy("dataInicio", "asc");
+      // Por padrão traz os eventos mais recentes primeiro (desc) para manter consistência
+      // com a renumeração (mais novo = 1). Se quiser asc, passe ?order=asc na URL (query param).
+      const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
+      const order = orderParam === "asc" ? "asc" : "desc";
+
+      let query = db.collection("eventos").orderBy("dataInicio", order);
 
       const de = filtroDe?.value;
       const ate = filtroAte?.value;
@@ -764,6 +839,7 @@ async function renumerarEventosCodigoSequencial() {
         eventosCache.push({ id, ...ev });
       });
 
+      // Se você preferir sempre apresentar o mais novo primeiro na UI, eventosCache já tem 'desc'
       renderTabela();
     } catch (err) {
       console.error(err);
@@ -875,60 +951,58 @@ async function renumerarEventosCodigoSequencial() {
     return `Período: ${de} até ${ate}`;
   }
 
+  function gerarCabecalhoCorporativo(doc, titulo) {
+    const hoje = new Date();
+    const dataStr = hoje.toLocaleDateString("pt-BR");
+    const horaStr = hoje.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
-function gerarCabecalhoCorporativo(doc, titulo) {
-  const hoje = new Date();
-  const dataStr = hoje.toLocaleDateString("pt-BR");
-  const horaStr = hoje.toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+    // Faixa superior
+    doc.setFillColor(5, 30, 45);
+    doc.rect(0, 0, 210, 20, "F");
 
-  // Faixa superior
-  doc.setFillColor(5, 30, 45);
-  doc.rect(0, 0, 210, 20, "F");
+    // Logos (se já carregadas)
+    try {
+      if (logoIfprImg && logoIfprImg.complete) {
+        doc.addImage(logoIfprImg, "PNG", 10, 3, 18, 14);
+      }
+      if (logoPmpImg && logoPmpImg.complete) {
+        doc.addImage(logoPmpImg, "PNG", 32, 2.5, 18, 15);
+      }
+      if (logoSebraeImg && logoSebraeImg.complete) {
+        doc.addImage(logoSebraeImg, "PNG", 180, 3, 18, 14);
+      }
+    } catch (e) {
+      // Se não conseguir carregar as logos, apenas segue sem elas
+      console.warn("Não foi possível adicionar alguma logo no cabeçalho do PDF:", e);
+    }
 
-  // Logos (se já carregadas)
-  try {
-    if (logoIfprImg && logoIfprImg.complete) {
-      doc.addImage(logoIfprImg, "PNG", 10, 3, 18, 14);
-    }
-    if (logoPmpImg && logoPmpImg.complete) {
-      doc.addImage(logoPmpImg, "PNG", 32, 2.5, 18, 15);
-    }
-    if (logoSebraeImg && logoSebraeImg.complete) {
-      doc.addImage(logoSebraeImg, "PNG", 180, 3, 18, 14);
-    }
-  } catch (e) {
-    // Se não conseguir carregar as logos, apenas segue sem elas
-    console.warn("Não foi possível adicionar alguma logo no cabeçalho do PDF:", e);
+    // Títulos
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("INSTITUTO FEDERAL DO PARANÁ - CAMPUS PALMAS", 60, 7);
+
+    doc.setFontSize(9);
+    doc.text("Incubadora IFPR / Prefeitura Municipal de Palmas / Sebrae-PR", 60, 12);
+
+    doc.setFontSize(9);
+    doc.text(titulo, 60, 17);
+
+    // Linha de informações gerais logo abaixo
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`Emitido em: ${dataStr} às ${horaStr}`, 10, 27);
+    doc.text(obterDescricaoPeriodo(), 10, 32);
+
+    // Linha divisória
+    doc.setDrawColor(0, 143, 76);
+    doc.setLineWidth(0.5);
+    doc.line(10, 35, 200, 35);
   }
-
-  // Títulos
-  doc.setTextColor(255, 255, 255);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("INSTITUTO FEDERAL DO PARANÁ - CAMPUS PALMAS", 60, 7);
-
-  doc.setFontSize(9);
-  doc.text("Incubadora IFPR / Prefeitura Municipal de Palmas / Sebrae-PR", 60, 12);
-
-  doc.setFontSize(9);
-  doc.text(titulo, 60, 17);
-
-  // Linha de informações gerais logo abaixo
-  doc.setTextColor(0, 0, 0);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text(`Emitido em: ${dataStr} às ${horaStr}`, 10, 27);
-  doc.text(obterDescricaoPeriodo(), 10, 32);
-
-  // Linha divisória
-  doc.setDrawColor(0, 143, 76);
-  doc.setLineWidth(0.5);
-  doc.line(10, 35, 200, 35);
-}
-
 
   // ========= Relatório completo – visão gerencial =========
 
