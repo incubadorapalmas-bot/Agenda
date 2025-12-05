@@ -32,70 +32,247 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logoSebraeImg = new Image();
   logoSebraeImg.src = "Sebrae.png";
 
-  // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
-  const HEIC2ANY_SRC =
-    "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js";
+ // Substitua/adicione as funções abaixo no seu app.js para garantir que imagens HEIC/HEIF
+// sejam convertidas para JPEG ao carregar (exibição e PDFs).
+//
+// Inclui:
+// - ensureHeic2any(): carrega heic2any via CDN (cacheado).
+// - blobToDataURL(), dataURLtoBlob(): utilitários.
+// - convertDataUrlIfHeic(): converte dataURLs HEIC ou URLs terminando em .heic/.heif para dataURL JPEG.
+// - getFotosEvento() e carregarFotosDoEvento(): versão que usa a conversão ao carregar.
+//
+// Observação: essas funções fazem a conversão em memória. Se quiser persistir a versão JPEG no Firestore
+// para evitar reconversões futuras, posso incluir opcionalmente um update do documento (consome gravações).
 
-  function ensureHeic2any() {
-    if (
-      window.__heic2anyFn &&
-      typeof window.__heic2anyFn === "function"
-    ) {
-      return Promise.resolve(window.__heic2anyFn);
-    }
+/* ---------- utilitários / conversão HEIC ---------- */
 
-    if (window.heic2any) {
+const HEIC2ANY_SRC = "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js";
+
+function ensureHeic2any() {
+  if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") return Promise.resolve(window.__heic2anyFn);
+  if (window.heic2any) {
+    const g = window.heic2any;
+    const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default);
+    if (fn) { window.__heic2anyFn = fn; return Promise.resolve(fn); }
+  }
+  if (window.__heic2anyLoading) return window.__heic2anyLoading;
+
+  window.__heic2anyLoading = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = HEIC2ANY_SRC;
+    s.async = true;
+    s.onload = () => {
       const g = window.heic2any;
-      const fn =
-        (typeof g === "function" && g) ||
-        (g && typeof g.default === "function" && g.default);
-      if (fn) {
-        window.__heic2anyFn = fn;
-        return Promise.resolve(fn);
+      let fn = null;
+      if (typeof g === "function") fn = g;
+      else if (g && typeof g.default === "function") fn = g.default;
+      else if (g && typeof g.heic2any === "function") fn = g.heic2any;
+      if (!fn && window.__heic2anyFn && typeof window.__heic2anyFn === "function") fn = window.__heic2anyFn;
+      if (!fn) return reject(new Error("heic2any não expôs a função esperada"));
+      window.__heic2anyFn = fn;
+      resolve(fn);
+    };
+    s.onerror = () => reject(new Error("Falha ao carregar heic2any CDN"));
+    document.head.appendChild(s);
+  });
+
+  return window.__heic2anyLoading;
+}
+
+function dataURLtoBlob(dataurl) {
+  const parts = dataurl.split(',');
+  if (parts.length !== 2) throw new Error('dataURL inválida');
+  const meta = parts[0];
+  const b64 = parts[1];
+  const mimeMatch = meta.match(/data:(.*?)(;base64)?$/);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  const byteString = atob(b64);
+  const ia = new Uint8Array(byteString.length);
+  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+  return new Blob([ia], { type: mime });
+}
+
+function blobToDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+}
+
+function isHeicDataUrl(src) {
+  if (!src || typeof src !== 'string') return false;
+  const s = src.toLowerCase();
+  return s.startsWith('data:image/heic') || s.startsWith('data:image/heif') || s.includes('image/heic') || s.includes('image/heif');
+}
+
+function isHeicUrl(src) {
+  if (!src || typeof src !== 'string') return false;
+  const s = src.toLowerCase().split('?')[0].split('#')[0];
+  return s.endsWith('.heic') || s.endsWith('.heif');
+}
+
+/**
+ * Converte um dataURL HEIC ou uma URL .heic/.heif remota para dataURL JPEG.
+ * - Usa cache em window.__heicConvertedCache para evitar reconversões.
+ * - Em caso de falha retorna o src original (fallback).
+ */
+async function convertDataUrlIfHeic(src) {
+  try {
+    if (!src || typeof src !== 'string') return src;
+
+    // cache
+    window.__heicConvertedCache = window.__heicConvertedCache || {};
+    if (window.__heicConvertedCache[src]) return window.__heicConvertedCache[src];
+
+    // 1) dataURL HEIC
+    if (isHeicDataUrl(src)) {
+      try {
+        const blob = dataURLtoBlob(src);
+        const heic = await ensureHeic2any();
+        const converted = await heic({ blob, toType: 'image/jpeg', quality: 0.9 });
+        const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) && converted.length ? converted[0] : converted);
+        if (!jpegBlob) throw new Error('heic2any retornou vazio');
+        const jpgDataUrl = await blobToDataURL(jpegBlob);
+        window.__heicConvertedCache[src] = jpgDataUrl;
+        return jpgDataUrl;
+      } catch (err) {
+        console.warn('Falha ao converter dataURL HEIC -> JPEG:', err);
+        return src;
       }
     }
 
-    if (window.__heic2anyLoading) {
-      return window.__heic2anyLoading;
+    // 2) URL remota terminando com .heic/.heif
+    if (isHeicUrl(src)) {
+      try {
+        const resp = await fetch(src);
+        if (!resp.ok) throw new Error('fetch falhou: ' + resp.status);
+        const blob = await resp.blob();
+        const heic = await ensureHeic2any();
+        const converted = await heic({ blob, toType: 'image/jpeg', quality: 0.9 });
+        const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) && converted.length ? converted[0] : converted);
+        if (!jpegBlob) throw new Error('heic2any retornou vazio (remoto)');
+        const jpgDataUrl = await blobToDataURL(jpegBlob);
+        window.__heicConvertedCache[src] = jpgDataUrl;
+        return jpgDataUrl;
+      } catch (err) {
+        console.warn('Falha ao buscar/convert .heic remoto:', err);
+        return src;
+      }
     }
 
-    window.__heic2anyLoading = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = HEIC2ANY_SRC;
-      script.async = true;
-
-      script.onload = () => {
-        const g = window.heic2any;
-        let fn = null;
-        if (typeof g === "function") fn = g;
-        else if (g && typeof g.default === "function") fn = g.default;
-        else if (g && typeof g.heic2any === "function") fn = g.heic2any;
-
-        if (!fn && window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
-          fn = window.__heic2anyFn;
-        }
-
-        if (!fn) {
-          reject(
-            new Error(
-              "Script heic2any carregado, mas função não encontrada."
-            )
-          );
-          return;
-        }
-        window.__heic2anyFn = fn;
-        resolve(fn);
-      };
-
-      script.onerror = () => {
-        reject(new Error("Falha ao carregar script heic2any a partir do CDN."));
-      };
-
-      document.head.appendChild(script);
-    });
-
-    return window.__heic2anyLoading;
+    // não é HEIC, retorna original
+    return src;
+  } catch (err) {
+    console.error('Erro em convertDataUrlIfHeic:', err);
+    return src;
   }
+}
+
+/* ---------- getFotosEvento e carregarFotosDoEvento (com conversão) ---------- */
+
+/**
+ * getFotosEvento(idEvento)
+ * - retorna lista [{ src: dataUrlJPEGorOriginal, legenda }]
+ * - converte HEIC/HEIF para JPEG quando necessário
+ */
+async function getFotosEvento(idEvento) {
+  const fotos = [];
+  try {
+    const snap = await db.collection('eventos').doc(idEvento).collection('fotos').get();
+    for (const docFoto of snap.docs) {
+      const data = docFoto.data();
+      let src = data.dataUrl || data.url || '';
+      if (!src) continue;
+      try {
+        src = await convertDataUrlIfHeic(src);
+      } catch (err) {
+        console.warn('Falha ao converter foto do evento (seguindo com original):', err);
+      }
+      fotos.push({ src, legenda: data.legenda || '' });
+    }
+  } catch (err) {
+    console.error('Erro ao buscar fotos do evento', err);
+  }
+  return fotos;
+}
+
+/**
+ * carregarFotosDoEvento(idEvento)
+ * - Atualiza DOM em #fotosAtuais com imagens convertidas
+ * - Mostra wrapper ou oculta conforme resultado
+ */
+async function carregarFotosDoEvento(idEvento) {
+  if (!fotosAtuaisDiv || !fotosAtuaisWrapper) return;
+  fotosAtuaisDiv.innerHTML = '';
+
+  try {
+    const snap = await db.collection('eventos').doc(idEvento).collection('fotos').get();
+    if (snap.empty) {
+      fotosAtuaisWrapper.classList.add('oculto');
+      return;
+    }
+
+    fotosAtuaisWrapper.classList.remove('oculto');
+
+    for (const docFoto of snap.docs) {
+      const d = docFoto.data();
+      let src = d.dataUrl || d.url || '';
+      if (!src) continue;
+
+      // show temporary placeholder while converting (optional)
+      const card = document.createElement('div');
+      card.className = 'foto-thumb';
+      const img = document.createElement('img');
+      img.className = 'foto-thumb__img';
+      img.alt = d.legenda || 'Foto do evento';
+      // set a low-opacity placeholder so layout is stable
+      img.style.opacity = '0.0';
+      img.src = ''; // will set after conversion
+      const caption = document.createElement('span');
+      caption.textContent = d.legenda || '';
+      const btnExcluir = document.createElement('button');
+      btnExcluir.type = 'button';
+      btnExcluir.textContent = 'Excluir';
+      btnExcluir.className = 'btn secundario';
+      btnExcluir.style.marginTop = '6px';
+
+      // exclude handler
+      btnExcluir.addEventListener('click', async () => {
+        const ok = confirm('Excluir esta foto do evento?');
+        if (!ok) return;
+        try {
+          await db.collection('eventos').doc(idEvento).collection('fotos').doc(docFoto.id).delete();
+          card.remove();
+          if (!fotosAtuaisDiv.querySelector('.foto-thumb')) fotosAtuaisWrapper.classList.add('oculto');
+        } catch (err) {
+          console.error('Erro ao excluir foto', err);
+          alert('Erro ao excluir foto. Veja console.');
+        }
+      });
+
+      card.appendChild(img);
+      card.appendChild(caption);
+      card.appendChild(btnExcluir);
+      fotosAtuaisDiv.appendChild(card);
+
+      // convert if needed and update img.src
+      try {
+        const converted = await convertDataUrlIfHeic(src);
+        img.src = converted || src;
+        img.style.opacity = '1';
+      } catch (err) {
+        console.warn('Falha ao converter/exibir imagem (usando original):', err);
+        img.src = src;
+        img.style.opacity = '1';
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao carregar fotos do evento', err);
+    fotosAtuaisWrapper.classList.add('oculto');
+  }
+}
 
   // ========= Utilitários para conversão de dataURLs/blobs =========
 
