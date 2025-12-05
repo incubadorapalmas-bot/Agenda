@@ -913,64 +913,89 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // ========= Carregar e listar eventos =========
-  async function carregarEventos() {
-    if (!tabelaBody) return;
+  // Substitua a função carregarEventos existente por esta versão
+async function carregarEventos() {
+  if (!tabelaBody) return;
 
-    tabelaBody.innerHTML = "";
-    eventosCache = [];
+  tabelaBody.innerHTML = "";
+  eventosCache = [];
 
-    try {
-      // Por padrão traz os eventos mais recentes primeiro (desc) para exibição
-      const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
-      const order = orderParam === "asc" ? "asc" : "desc"; // default = desc (mais recente primeiro)
+  try {
+    // Ordem padrão (mais recente primeiro)
+    const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
+    const order = orderParam === "asc" ? "asc" : "desc";
 
-      // Aplica possível filtro IS
-      let queryRef = db.collection("eventos");
+    // Base da query
+    let queryRef = db.collection("eventos");
 
-      const field = filterField?.value?.trim();
-      const valRaw = filterValue?.value?.trim();
+    // Filtros IS
+    const fieldRaw = (filterField?.value || "").trim();
+    const valRaw = (filterValue?.value || "").trim();
 
-      if (field && valRaw) {
-        if (field === "id") {
-          // busca direta por id do documento
-          const docSnap = await db.collection("eventos").doc(valRaw).get();
-          if (docSnap.exists) {
-            eventosCache.push({ id: docSnap.id, ...docSnap.data() });
-          }
+    if (fieldRaw && valRaw) {
+      const field = fieldRaw; // 'id' | 'codigo' | 'evento' | ...
+      // Caso 'id' — tenta Document ID primeiro; se não existir e for número, busca por 'codigo'
+      if (field === "id") {
+        // tenta buscar documento por ID exato
+        const docSnap = await db.collection("eventos").doc(valRaw).get();
+        if (docSnap.exists) {
+          eventosCache.push({ id: docSnap.id, ...docSnap.data() });
           renderTabela();
           return;
+        }
+        // não achou doc com esse id -> se for número, busca por campo 'codigo'
+        const n = Number(valRaw);
+        if (!Number.isNaN(n)) {
+          queryRef = queryRef.where("codigo", "==", n);
         } else {
-          let value = valRaw;
-          if (field === "codigo") {
-            const n = Number(valRaw);
-            if (!Number.isNaN(n)) value = n;
+          // fallback: procura em campo 'evento' (string) por igualdade
+          queryRef = queryRef.where("evento", "==", valRaw);
+        }
+      } else {
+        // Outros campos: aplica where de igualdade
+        let value = valRaw;
+        if (field === "codigo") {
+          const n = Number(valRaw);
+          if (!Number.isNaN(n)) value = n;
+          else {
+            // se o usuário digitou texto no campo 'codigo', não fará match numérico
+            // definimos um where que nunca retorna nada para evitar scaneamento
+            queryRef = queryRef.where("codigo", "==", value);
           }
+        }
+        // se queryRef já foi alterado porque codigo era inválido, this will override; otherwise:
+        if (queryRef === db.collection("eventos")) {
           queryRef = queryRef.where(field, "==", value);
+        } else {
+          // queryRef já foi atualizado (p.ex. codigo path acima), não reatribuir
         }
       }
-
-      queryRef = queryRef.orderBy("dataInicio", order);
-
-      const de = filtroDe?.value;
-      const ate = filtroAte?.value;
-
-      if (de) queryRef = queryRef.where("dataInicio", ">=", de);
-      if (ate) queryRef = queryRef.where("dataInicio", "<=", ate);
-
-      const snap = await queryRef.get();
-
-      snap.forEach((doc) => {
-        const ev = doc.data();
-        const id = doc.id;
-        eventosCache.push({ id, ...ev });
-      });
-
-      renderTabela();
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao carregar eventos.\nVerifique o console.");
     }
+
+    // Aplica ordenação por dataInicio (importante: combinar where + orderBy pode exigir índice no Firestore)
+    queryRef = queryRef.orderBy("dataInicio", order);
+
+    // Filtros de período
+    const de = filtroDe?.value;
+    const ate = filtroAte?.value;
+    if (de) queryRef = queryRef.where("dataInicio", ">=", de);
+    if (ate) queryRef = queryRef.where("dataInicio", "<=", ate);
+
+    // Executa query
+    const snap = await queryRef.get();
+
+    snap.forEach((doc) => {
+      const ev = doc.data();
+      const id = doc.id;
+      eventosCache.push({ id, ...ev });
+    });
+
+    renderTabela();
+  } catch (err) {
+    console.error("Erro ao carregar eventos (com filtro IS):", err);
+    alert("Erro ao carregar eventos. Veja o console (F12). Se for índice do Firestore, siga o link do erro para criar o índice.");
   }
+}
 
   function renderTabela() {
     if (!tabelaBody) return;
