@@ -1,10 +1,6 @@
 // app.js - Agenda Incubadora IFPR/PMP
-// Versão atualizada: tratamento robusto para HEIC/HEIF ao carregar imagens
-// - Converte dataURLs HEIC/HEIF armazenados no Firestore para JPEG antes de exibir ou inserir em PDFs.
-// - Usa heic2any via CDN quando necessário.
-// - Se a conversão falhar, usa o dataURL original como fallback (com aviso).
-//
-// Cole por cima do seu app.js atual.
+// Versão completa: tratamento HEIC/HEIF, renumeração, filtros, previews, e geração de PDFs.
+// Cole por cima do seu app.js atual (substitua totalmente).
 
 document.addEventListener("DOMContentLoaded", async () => {
   // ========= INICIALIZAÇÃO jsPDF (mais robusto) =========
@@ -324,6 +320,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const filtroAte = document.getElementById("filtroAte");
   const btnFiltrar = document.getElementById("btnFiltrar");
   const btnLimparFiltro = document.getElementById("btnLimparFiltro");
+
+  // filtro IS UI (se presente no index.html)
+  const filterField = document.getElementById("filterField");
+  const filterValue = document.getElementById("filterValue");
+  const btnAplicarIs = document.getElementById("btnAplicarIs");
+  const btnLimparIs = document.getElementById("btnLimparIs");
 
   const btnPdfCompleto = document.getElementById("btnPdfCompleto");
   const btnPdfSimples = document.getElementById("btnPdfSimples");
@@ -922,15 +924,40 @@ document.addEventListener("DOMContentLoaded", async () => {
       const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
       const order = orderParam === "asc" ? "asc" : "desc"; // default = desc (mais recente primeiro)
 
-      let query = db.collection("eventos").orderBy("dataInicio", order);
+      // Aplica possível filtro IS
+      let queryRef = db.collection("eventos");
+
+      const field = filterField?.value?.trim();
+      const valRaw = filterValue?.value?.trim();
+
+      if (field && valRaw) {
+        if (field === "id") {
+          // busca direta por id do documento
+          const docSnap = await db.collection("eventos").doc(valRaw).get();
+          if (docSnap.exists) {
+            eventosCache.push({ id: docSnap.id, ...docSnap.data() });
+          }
+          renderTabela();
+          return;
+        } else {
+          let value = valRaw;
+          if (field === "codigo") {
+            const n = Number(valRaw);
+            if (!Number.isNaN(n)) value = n;
+          }
+          queryRef = queryRef.where(field, "==", value);
+        }
+      }
+
+      queryRef = queryRef.orderBy("dataInicio", order);
 
       const de = filtroDe?.value;
       const ate = filtroAte?.value;
 
-      if (de) query = query.where("dataInicio", ">=", de);
-      if (ate) query = query.where("dataInicio", "<=", ate);
+      if (de) queryRef = queryRef.where("dataInicio", ">=", de);
+      if (ate) queryRef = queryRef.where("dataInicio", "<=", ate);
 
-      const snap = await query.get();
+      const snap = await queryRef.get();
 
       snap.forEach((doc) => {
         const ev = doc.data();
@@ -1035,7 +1062,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // ========= Funções para PDFs (mantive as suas versões anteriores, com uso de getFotosEvento que agora converte HEIC) =========
+  if (btnAplicarIs) btnAplicarIs.addEventListener("click", carregarEventos);
+  if (btnLimparIs) btnLimparIs.addEventListener("click", () => {
+    if (filterField) filterField.value = "";
+    if (filterValue) filterValue.value = "";
+    carregarEventos();
+  });
+
+  // ========= Funções para PDFs (com suporte a imagens convertidas) =========
 
   function obterDescricaoPeriodo() {
     if (!filtroDe?.value && !filtroAte?.value) {
@@ -1094,10 +1128,518 @@ document.addEventListener("DOMContentLoaded", async () => {
     doc.line(10, 35, 200, 35);
   }
 
-  // Funções gerarPdfCompleto, gerarPdfSimples e gerarPdfEventoComFotos seguem sua lógica anterior,
-  // usando getFotosEvento(...) para obter imagens já convertidas quando necessário.
-  // (Se quiser, eu posso re-inserir as funções completas aqui; mantive-os fora por brevidade,
-  //  pois o ponto crítico era a conversão HEIC.)
+  async function gerarPdfCompleto() {
+    if (!jsPDF) {
+      alert("jsPDF não foi carregado. Verifique os scripts.");
+      return;
+    }
+
+    const doc = new jsPDF("p", "mm", "a4");
+
+    gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
+
+    let y = 44;
+    const col = {
+      idx: 10,
+      data: 18,
+      tipo: 35,
+      local: 80,
+      participante: 130,
+      formato: 180,
+    };
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("ID", col.idx, y);
+    doc.text("Data", col.data, y);
+    doc.text("Tipo", col.tipo, y);
+    doc.text("Local", col.local, y);
+    doc.text("Participante", col.participante, y);
+    doc.text("Formato", col.formato, y);
+
+    y += 4;
+    doc.setFont("helvetica", "normal");
+
+    for (let index = 0; index < eventosCache.length; index++) {
+      const ev = eventosCache[index];
+
+      if (y > 270) {
+        doc.addPage();
+        gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
+        y = 44;
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text("ID", col.idx, y);
+        doc.text("Data", col.data, y);
+        doc.text("Tipo", col.tipo, y);
+        doc.text("Local", col.local, y);
+        doc.text("Participante", col.participante, y);
+        doc.text("Formato", col.formato, y);
+        y += 4;
+        doc.setFont("helvetica", "normal");
+      }
+
+      const eventTop = y;
+
+      // ID só seu (codigo / idSequencial)
+      const displayId =
+        ev.codigo !== undefined && ev.codigo !== null
+          ? ev.codigo
+          : ev.idSequencial !== undefined && ev.idSequencial !== null
+          ? ev.idSequencial
+          : "";
+
+      const dataEv = ev.dataInicio || "";
+      const tipoEv = ev.evento || "";
+      const localEv = ev.local || "";
+      const partEv = ev.participante || "";
+      const formatoEv = ev.formato || "";
+
+      doc.text(String(displayId), col.idx, y);
+      doc.text(dataEv, col.data, y);
+
+      const tipoLines = doc.splitTextToSize(tipoEv, col.local - col.tipo - 2);
+      const localLines = doc.splitTextToSize(
+        localEv,
+        col.participante - col.local - 2
+      );
+      const partLines = doc.splitTextToSize(
+        partEv,
+        col.formato - col.participante - 2
+      );
+
+      const maxLines = Math.max(
+        tipoLines.length,
+        localLines.length,
+        partLines.length
+      );
+
+      for (let i = 0; i < maxLines; i++) {
+        if (i > 0) {
+          y += 4;
+          if (y > 270) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Relatório Gerencial de Eventos"
+            );
+            y = 44;
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(9);
+            doc.text("ID", col.idx, y);
+            doc.text("Data", col.data, y);
+            doc.text("Tipo", col.tipo, y);
+            doc.text("Local", col.local, y);
+            doc.text("Participante", col.participante, y);
+            doc.text("Formato", col.formato, y);
+            y += 4;
+            doc.setFont("helvetica", "normal");
+          }
+        }
+        if (tipoLines[i]) doc.text(tipoLines[i], col.tipo, y);
+        if (localLines[i]) doc.text(localLines[i], col.local, y);
+        if (partLines[i]) doc.text(partLines[i], col.participante, y);
+        if (i === 0 && formatoEv) doc.text(formatoEv, col.formato, y);
+      }
+
+      y += 4;
+
+      const horarioStr =
+        (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "");
+      const dataFimStr =
+        ev.dataFim && ev.dataFim !== ev.dataInicio
+          ? ` até ${ev.dataFim}`
+          : "";
+      const enderecoStr = ev.endereco || "";
+      const pautaStr = ev.pauta || "";
+      const comentarioStr = ev.comentario || "";
+
+      const detalhes = [];
+
+      if (ev.dataInicio) {
+        detalhes.push(`Período: ${ev.dataInicio}${dataFimStr}`);
+      }
+      if (horarioStr.trim()) detalhes.push(`Horário: ${horarioStr}`);
+      if (enderecoStr) detalhes.push(`Endereço: ${enderecoStr}`);
+      if (pautaStr) detalhes.push(`Pauta: ${pautaStr}`);
+      if (comentarioStr) detalhes.push(`Comentário: ${comentarioStr}`);
+
+      if (detalhes.length) {
+        const bloco = doc.splitTextToSize(detalhes.join(" | "), 180);
+        doc.setFontSize(8);
+
+        bloco.forEach((linha) => {
+          if (y > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Relatório Gerencial de Eventos"
+            );
+            y = 44;
+          }
+          doc.text(linha, 14, y);
+          y += 3;
+        });
+
+        doc.setFontSize(9);
+        y += 2;
+      }
+
+      const fotos = await getFotosEvento(ev.id);
+      if (fotos.length) {
+        if (y > 270) {
+          doc.addPage();
+          gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
+          y = 44;
+        }
+
+        doc.setFontSize(8);
+        doc.text("Fotos:", 14, y);
+        y += 4;
+
+        const thumbWidth = 35;
+        const thumbHeight = 26;
+        let x = 14;
+        let count = 0;
+
+        for (const foto of fotos) {
+          if (y + thumbHeight > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Relatório Gerencial de Eventos"
+            );
+            y = 44;
+            x = 14;
+          }
+
+          try {
+            doc.addImage(foto.src, "JPEG", x, y, thumbWidth, thumbHeight);
+          } catch (err) {
+            console.warn("Erro ao adicionar imagem no PDF completo", err);
+          }
+
+          if (foto.legenda) {
+            doc.setFontSize(6);
+            const legLines = doc.splitTextToSize(
+              foto.legenda,
+              thumbWidth
+            );
+            doc.text(legLines, x, y + thumbHeight + 3);
+            doc.setFontSize(8);
+          }
+
+          x += thumbWidth + 4;
+          count++;
+
+          if (count % 4 === 0) {
+            x = 14;
+            y += thumbHeight + 10;
+          }
+        }
+
+        if (count % 4 !== 0) {
+          y += thumbHeight + 10;
+        }
+      }
+
+      const eventBottom = y;
+
+      doc.setDrawColor(180);
+      doc.setLineWidth(0.3);
+      doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
+
+      y += 2;
+    }
+
+    doc.save("relatorio-gerencial-eventos-incubadora.pdf");
+  }
+
+  async function gerarPdfSimples() {
+    if (!jsPDF) {
+      alert("jsPDF não foi carregado. Verifique os scripts.");
+      return;
+    }
+
+    const doc = new jsPDF("p", "mm", "a4");
+
+    gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
+
+    let y = 44;
+
+    const cabecalhoSimples = () => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("ID", 10, y);
+      doc.text("Data", 18, y);
+      doc.text("Evento / Local", 40, y);
+      doc.text("Comentário", 125, y);
+      y += 4;
+      doc.setFont("helvetica", "normal");
+    };
+
+    cabecalhoSimples();
+
+    for (let index = 0; index < eventosCache.length; index++) {
+      const ev = eventosCache[index];
+
+      if (y > 275) {
+        doc.addPage();
+        gerarCabecalhoCorporativo(
+          doc,
+          "Agenda Simplificada – Michelle"
+        );
+        y = 44;
+        cabecalhoSimples();
+      }
+
+      const eventTop = y;
+
+      const displayId =
+        ev.codigo !== undefined && ev.codigo !== null
+          ? ev.codigo
+          : ev.idSequencial !== undefined && ev.idSequencial !== null
+          ? ev.idSequencial
+          : "";
+
+      const dataEv = ev.dataInicio || "";
+      const linhaEvento = `${ev.evento || ""}${
+        ev.local ? " - " + ev.local : ""
+      }`;
+      const comentario = ev.comentario || "";
+
+      const eventoLines = doc.splitTextToSize(linhaEvento, 80);
+      const comentLines = doc.splitTextToSize(comentario, 75);
+      const maxLines = Math.max(eventoLines.length, comentLines.length);
+
+      for (let i = 0; i < maxLines; i++) {
+        if (i > 0) {
+          y += 4;
+          if (y > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Agenda Simplificada – Michelle"
+            );
+            y = 44;
+            cabecalhoSimples();
+          }
+        }
+
+        if (i === 0) {
+          doc.text(String(displayId), 10, y);
+          doc.text(dataEv, 18, y);
+        }
+        if (eventoLines[i]) doc.text(eventoLines[i], 40, y);
+        if (comentLines[i]) doc.text(comentLines[i], 125, y);
+      }
+
+      y += 5;
+
+      const fotos = await getFotosEvento(ev.id);
+      if (fotos.length) {
+        if (y > 270) {
+          doc.addPage();
+          gerarCabecalhoCorporativo(
+            doc,
+            "Agenda Simplificada – Michelle"
+          );
+          y = 44;
+          cabecalhoSimples();
+        }
+
+        doc.setFontSize(8);
+        doc.text("Fotos:", 14, y);
+        y += 4;
+
+        const thumbWidth = 35;
+        const thumbHeight = 26;
+        let x = 14;
+        let count = 0;
+
+        for (const foto of fotos) {
+          if (y + thumbHeight > 275) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(
+              doc,
+              "Agenda Simplificada – Michelle"
+            );
+            y = 44;
+            cabecalhoSimples();
+            x = 14;
+          }
+
+          try {
+            doc.addImage(foto.src, "JPEG", x, y, thumbWidth, thumbHeight);
+          } catch (err) {
+            console.warn("Erro ao adicionar imagem no PDF simples", err);
+          }
+
+          if (foto.legenda) {
+            doc.setFontSize(6);
+            const legLines = doc.splitTextToSize(
+              foto.legenda,
+              thumbWidth
+            );
+            doc.text(legLines, x, y + thumbHeight + 3);
+            doc.setFontSize(8);
+          }
+
+          x += thumbWidth + 4;
+          count++;
+
+          if (count % 4 === 0) {
+            x = 14;
+            y += thumbHeight + 10;
+          }
+        }
+
+        if (count % 4 !== 0) {
+          y += thumbHeight + 10;
+        }
+      }
+
+      const eventBottom = y;
+
+      doc.setDrawColor(180);
+      doc.setLineWidth(0.3);
+      doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
+
+      y += 3;
+    }
+
+    doc.save("agenda-simplificada-michelle.pdf");
+  }
+
+  async function gerarPdfEventoComFotos(idEvento) {
+    if (!jsPDF) {
+      alert("jsPDF não foi carregado. Verifique os scripts.");
+      return;
+    }
+
+    try {
+      const docRef = await db.collection("eventos").doc(idEvento).get();
+      if (!docRef.exists) {
+        alert("Evento não encontrado.");
+        return;
+      }
+
+      const ev = docRef.data();
+
+      // ID do relatório no PDF do evento: só seu número
+      const cacheEv = eventosCache.find((e) => e.id === idEvento);
+      const codigoEvento =
+        (cacheEv &&
+        cacheEv.codigo !== undefined &&
+        cacheEv.codigo !== null
+          ? cacheEv.codigo
+          : null) ??
+        (ev.codigo !== undefined && ev.codigo !== null ? ev.codigo : null) ??
+        (cacheEv &&
+        cacheEv.idSequencial !== undefined &&
+        cacheEv.idSequencial !== null
+          ? cacheEv.idSequencial
+          : null) ??
+        null;
+
+      const fotosSnap = await db
+        .collection("eventos")
+        .doc(idEvento)
+        .collection("fotos")
+        .get();
+
+      const doc = new jsPDF("p", "mm", "a4");
+
+      doc.setFontSize(14);
+      doc.text("Relatório do Evento", 10, 10);
+
+      doc.setFontSize(10);
+      let y = 18;
+
+      const infos = [
+        codigoEvento != null ? `ID do evento: ${codigoEvento}` : null,
+        `Evento: ${ev.evento || ""}`,
+        `Data: ${ev.dataInicio || ""}${
+          ev.dataFim && ev.dataFim !== ev.dataInicio
+            ? " até " + ev.dataFim
+            : ""
+        }`,
+        `Horário: ${
+          (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
+        }`,
+        `Local: ${ev.local || ""}`,
+        `Endereço: ${ev.endereco || ""}`,
+        ev.participante
+          ? `Participante/responsável: ${ev.participante}`
+          : "",
+        ev.pauta ? `Pauta: ${ev.pauta}` : "",
+        ev.comentario ? `Comentário: ${ev.comentario}` : "",
+      ].filter(Boolean);
+
+      infos.forEach((linha) => {
+        if (y > 275) {
+          doc.addPage();
+          y = 10;
+        }
+        const textLines = doc.splitTextToSize(linha, 190);
+        doc.text(textLines, 10, y);
+        y += textLines.length * 5;
+      });
+
+      if (!fotosSnap.empty) {
+        y += 5;
+        doc.setFontSize(11);
+        doc.text("Fotos do evento:", 10, y);
+        y += 5;
+      }
+
+      for (const fotoDoc of fotosSnap.docs) {
+        const { dataUrl, url, legenda } = fotoDoc.data();
+        const src = await (async () => {
+          try {
+            return await convertDataUrlIfHeic(dataUrl || url || "");
+          } catch (err) {
+            console.warn("convertDataUrlIfHeic erro em evento PDF:", err);
+            return dataUrl || url || "";
+          }
+        })();
+
+        if (!src) continue;
+
+        if (y > 200) {
+          doc.addPage();
+          y = 10;
+        }
+
+        try {
+          doc.addImage(src, "JPEG", 10, y, 80, 60);
+        } catch (err) {
+          console.warn("Erro ao adicionar imagem no PDF de evento", err);
+        }
+
+        if (legenda) {
+          doc.setFontSize(9);
+          doc.text(doc.splitTextToSize(legenda, 80), 10, y + 63);
+        }
+
+        y += 70;
+      }
+
+      const nomeArquivo =
+        "evento-" +
+        (ev.dataInicio || "sem-data") +
+        "-" +
+        (ev.evento || "sem-nome") +
+        ".pdf";
+
+      doc.save(nomeArquivo.replace(/\s+/g, "-"));
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao gerar PDF do evento.\nVerifique o console.");
+    }
+  }
 
   // ========= Inicialização =========
   // Primeiro: detectar se os códigos no banco parecem invertidos e oferecer correção.
