@@ -36,69 +36,78 @@ document.addEventListener("DOMContentLoaded", async () => {
   logoSebraeImg.src = "Sebrae.png";
 
   // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
-  const HEIC2ANY_SRC =
-    "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js";
+ // Substitua o bloco que define HEIC2ANY_SRC e a função ensureHeic2any por este:
 
-  function ensureHeic2any() {
-    if (
-      window.__heic2anyFn &&
-      typeof window.__heic2anyFn === "function"
-    ) {
-      return Promise.resolve(window.__heic2anyFn);
+const HEIC2ANY_SOURCES = [
+  "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js", // CDN (rápido quando disponível)
+  "/vendor/heic2any.min.js" // cópia local no repositório (garante funcionamento offline/CSP)
+];
+
+function ensureHeic2any() {
+  // retorna Promise que resolve com a função heic2any
+  if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
+    return Promise.resolve(window.__heic2anyFn);
+  }
+
+  // se a lib já foi exposta globalmente por um <script src="/vendor/..."> no HTML
+  if (window.heic2any) {
+    const g = window.heic2any;
+    const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+    if (fn) {
+      window.__heic2anyFn = fn;
+      return Promise.resolve(fn);
     }
+  }
 
-    if (window.heic2any) {
-      const g = window.heic2any;
-      const fn =
-        (typeof g === "function" && g) ||
-        (g && typeof g.default === "function" && g.default);
-      if (fn) {
-        window.__heic2anyFn = fn;
-        return Promise.resolve(fn);
+  // se já está carregando, devolve a mesma promise
+  if (window.__heic2anyLoading) return window.__heic2anyLoading;
+
+  // tenta carregar as fontes em sequência
+  window.__heic2anyLoading = new Promise(async (resolve, reject) => {
+    for (const src of HEIC2ANY_SOURCES) {
+      try {
+        // se é a fonte local e já existe no DOM, espera apenas que esteja disponível
+        if (src.startsWith("/")) {
+          // se já está global (carregado via <script>), pega
+          if (window.heic2any || window.__heic2anyFn) {
+            const g = window.heic2any || window.__heic2anyFn;
+            const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+            if (fn) { window.__heic2anyFn = fn; resolve(fn); return; }
+          }
+        }
+
+        // cria script dinamicamente
+        await new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = src;
+          s.async = true;
+          s.onload = () => res();
+          s.onerror = () => rej(new Error("Falha ao carregar " + src));
+          document.head.appendChild(s);
+        });
+
+        // após carregar, tenta extrair função
+        const g = window.heic2any;
+        const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+        if (fn) {
+          window.__heic2anyFn = fn;
+          resolve(fn);
+          return;
+        }
+        // se carregou mas não expôs, continua para próxima fonte
+      } catch (err) {
+        console.warn("Falha ao carregar heic2any de", src, ":", err && err.message ? err.message : err);
+        // tenta próxima fonte
       }
     }
 
-    if (window.__heic2anyLoading) {
-      return window.__heic2anyLoading;
-    }
+    // se chegou aqui, nenhuma fonte funcionou
+    delete window.__heic2anyLoading;
+    reject(new Error("Nenhuma fonte heic2any disponível (CDN e local falharam)"));
+  });
 
-    window.__heic2anyLoading = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = HEIC2ANY_SRC;
-      script.async = true;
-
-      script.onload = () => {
-        const g = window.heic2any;
-        let fn = null;
-        if (typeof g === "function") fn = g;
-        else if (g && typeof g.default === "function") fn = g.default;
-        else if (g && typeof g.heic2any === "function") fn = g.heic2any;
-
-        if (!fn && window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
-          fn = window.__heic2anyFn;
-        }
-
-        if (!fn) {
-          reject(
-            new Error(
-              "Script heic2any carregado, mas função não encontrada."
-            )
-          );
-          return;
-        }
-        window.__heic2anyFn = fn;
-        resolve(fn);
-      };
-
-      script.onerror = () => {
-        reject(new Error("Falha ao carregar script heic2any a partir do CDN."));
-      };
-
-      document.head.appendChild(script);
-    });
-
-    return window.__heic2anyLoading;
-  }
+  return window.__heic2anyLoading;
+}
 
   // tentar pré-carregar não bloqueante (melhora chance de conversão)
   ensureHeic2any().catch((e) => { console.warn("heic2any pré-load falhou:", e && e.message ? e.message : e); });
