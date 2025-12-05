@@ -11,124 +11,142 @@
   <!-- Firebase (SDK v8 compat) -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
-  <!-- opcional analytics:
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-analytics.js"></script>
-  -->
 
-  <!-- Seu firebase-config.js (deve estar no repo; carregue após firebase-app.js) -->
+  <!-- firebase-config (deve existir no repo) -->
   <script src="firebase-config.js"></script>
 
   <!-- jsPDF (usado para gerar PDFs) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-  <!-- theme.js (separado, leve) -->
+  <!-- theme toggle helper -->
   <script src="theme.js"></script>
 
-  <!-- app.js (substitua por este novo arquivo entregue por mim) -->
+  <!-- app.js (lógica da aplicação) -->
   <script src="app.js" defer></script>
 </head>
 
 <body>
-  <header class="topo">
+  <header class="topo" role="banner">
     <div class="container topo__conteudo">
-      <div class="topo__logos">
-        <img src="PMP.png" alt="Prefeitura de Palmas" class="logo" />
-        <img src="IFPR.png" alt="IFPR" class="logo" />
-        <img src="Sebrae.png" alt="Sebrae" class="logo" />
+      <div style="display:flex;align-items:center;gap:0.75rem;min-width:0;">
+        <div class="topo__logos" aria-hidden="true">
+          <img src="PMP.png" alt="PMP" class="logo" />
+          <img src="IFPR.png" alt="IFPR" class="logo" />
+          <img src="Sebrae.png" alt="Sebrae" class="logo" />
+        </div>
+
+        <div class="topo__titulo" role="heading" aria-level="1">
+          <h1>Agenda Incubadora IFPR / PMP</h1>
+          <p class="subtitulo">Controle de eventos, fotos e relatórios em PDF</p>
+        </div>
       </div>
 
-      <div class="topo__titulo">
-        <h1>Agenda Incubadora IFPR / PMP</h1>
-        <p class="subtitulo">Controle de eventos, fotos e relatórios em PDF</p>
-      </div>
-
-      <!-- Menu / ações rápidas (PDFs movidos para o menu) -->
-      <div class="topo__actions" role="navigation" aria-label="Ações rápidas">
-        <button id="btnPdfCompleto" class="btn">Gerar PDF Completo</button>
-        <button id="btnPdfSimples" class="btn secundario">Gerar PDF Simples</button>
-      </div>
+      <!-- Menu / ações rápidas -->
+      <nav class="topo__actions" role="navigation" aria-label="Ações rápidas">
+        <button id="btnPdfCompleto" class="btn primario" title="Gerar relatório gerencial (com fotos)">Gerar PDF Completo</button>
+        <button id="btnPdfSimples" class="btn secundario" title="Gerar agenda simplificada">Gerar PDF Simples</button>
+        <button id="btnToggleTema" class="btn" title="Alternar tema" aria-pressed="false">🌙</button>
+      </nav>
     </div>
   </header>
 
-  <main class="container principal">
+  <main class="container principal" role="main">
     <!-- FORMULÁRIO -->
-    <section id="form-section" class="card">
+    <section id="form-section" class="card" aria-labelledby="formTituloModo">
       <h2 id="formTituloModo">Cadastrar novo evento</h2>
-      <form id="eventoForm">
+      <form id="eventoForm" autocomplete="off">
         <input type="hidden" id="eventoId" />
 
         <div class="linha">
-          <label for="evento">Tipo de evento</label>
-          <input id="evento" type="text" required />
+          <div class="campo">
+            <label for="evento">Tipo de evento</label>
+            <input id="evento" type="text" required />
+          </div>
+
+          <div class="campo">
+            <label for="local">Local</label>
+            <input id="local" type="text" />
+          </div>
+
+          <div class="campo">
+            <label for="endereco">Endereço</label>
+            <input id="endereco" type="text" />
+          </div>
         </div>
 
         <div class="linha">
-          <label for="local">Local</label>
-          <input id="local" type="text" />
+          <div class="campo">
+            <label for="dataInicio">Data início</label>
+            <input id="dataInicio" type="date" />
+          </div>
+
+          <div class="campo">
+            <label for="dataFim">Data fim</label>
+            <input id="dataFim" type="date" />
+          </div>
+
+          <div class="campo">
+            <label for="formato">Formato</label>
+            <select id="formato">
+              <option>Presencial</option>
+              <option>Online</option>
+              <option>Híbrido</option>
+            </select>
+          </div>
         </div>
 
         <div class="linha">
-          <label for="endereco">Endereço</label>
-          <input id="endereco" type="text" />
+          <div class="campo">
+            <label for="horaInicio">Hora início</label>
+            <input id="horaInicio" type="time" />
+          </div>
+
+          <div class="campo">
+            <label for="horaFim">Hora fim</label>
+            <input id="horaFim" type="time" />
+          </div>
+
+          <div class="campo">
+            <label for="participante">Participante / Responsável</label>
+            <input id="participante" type="text" />
+          </div>
         </div>
 
         <div class="linha">
-          <label for="dataInicio">Data início</label>
-          <input id="dataInicio" type="date" />
-        </div>
-        <div class="linha">
-          <label for="dataFim">Data fim</label>
-          <input id="dataFim" type="date" />
+          <div class="campo" style="grid-column: 1 / -1;">
+            <label for="pauta">Pauta</label>
+            <textarea id="pauta" rows="3"></textarea>
+          </div>
         </div>
 
         <div class="linha">
-          <label for="horaInicio">Hora início</label>
-          <input id="horaInicio" type="time" />
-        </div>
-        <div class="linha">
-          <label for="horaFim">Hora fim</label>
-          <input id="horaFim" type="time" />
+          <div class="campo" style="grid-column: 1 / -1;">
+            <label for="comentario">Comentário</label>
+            <textarea id="comentario" rows="2"></textarea>
+          </div>
         </div>
 
         <div class="linha">
-          <label for="formato">Formato</label>
-          <select id="formato">
-            <option>Presencial</option>
-            <option>Online</option>
-            <option>Híbrido</option>
-          </select>
+          <div class="campo" style="grid-column: 1 / -1;">
+            <label for="fotos">Fotos (arraste ou selecione)</label>
+            <div id="dropArea" class="drop-area" tabindex="0">Arraste as fotos aqui ou <span class="drop-area__link">clique para selecionar</span></div>
+            <input id="fotos" type="file" accept="image/*,image/heic,image/heif" multiple style="display:none;" />
+            <div id="novasFotosPreview" class="preview"></div>
+          </div>
         </div>
 
         <div class="linha">
-          <label for="participante">Participante / Responsável</label>
-          <input id="participante" type="text" />
-        </div>
+          <div class="campo">
+            <label for="codigo">Código (apenas leitura após salvar)</label>
+            <input id="codigo" type="text" readonly />
+          </div>
 
-        <div class="linha">
-          <label for="pauta">Pauta</label>
-          <textarea id="pauta" rows="3"></textarea>
-        </div>
-
-        <div class="linha">
-          <label for="comentario">Comentário</label>
-          <textarea id="comentario" rows="2"></textarea>
-        </div>
-
-        <div class="linha">
-          <label for="fotos">Fotos (arraste ou selecione)</label>
-          <div id="dropArea" class="drop-area">Arraste as fotos aqui ou clique</div>
-          <input id="fotos" type="file" accept="image/*,image/heic,image/heif" multiple style="display:none;" />
-          <div id="novasFotosPreview" class="preview"></div>
-        </div>
-
-        <div class="linha">
-          <label for="codigo">Código (apenas leitura após salvar)</label>
-          <input id="codigo" type="text" readonly />
-        </div>
-
-        <div class="botoes">
-          <button id="btnSalvar" type="submit" class="btn primario">Salvar evento</button>
-          <button id="btnCancelarEdicao" type="button" class="btn secundario oculto">Cancelar</button>
+          <div style="grid-column: 2 / -1; display:flex; align-items:end; justify-content:flex-end;">
+            <div class="botoes" role="group" aria-label="Ações do formulário">
+              <button id="btnSalvar" type="submit" class="btn primario">Salvar evento</button>
+              <button id="btnCancelarEdicao" type="button" class="btn secundario oculto">Cancelar</button>
+            </div>
+          </div>
         </div>
       </form>
     </section>
@@ -137,78 +155,88 @@
     <section id="lista-section" class="card" style="margin-top:16px;">
       <h2>Eventos</h2>
 
-      <div class="filtros">
-        <div class="linha">
-          <label for="filtroDe">De</label>
-          <input id="filtroDe" type="date" />
-          <label for="filtroAte" style="margin-left:8px;">Até</label>
-          <input id="filtroAte" type="date" />
+      <div class="filtros" style="margin-bottom:12px;">
+        <div class="linha" style="grid-template-columns: repeat(3, minmax(0, 1fr)); gap:10px;">
+          <div class="campo">
+            <label for="filtroDe">De</label>
+            <input id="filtroDe" type="date" />
+          </div>
 
-          <button id="btnFiltrar" class="btn" style="margin-left:8px;">Aplicar período</button>
-          <button id="btnLimparFiltro" class="btn secundario" style="margin-left:6px;">Limpar período</button>
+          <div class="campo">
+            <label for="filtroAte">Até</label>
+            <input id="filtroAte" type="date" />
+          </div>
+
+          <div style="display:flex;gap:8px;align-items:end;">
+            <button id="btnFiltrar" class="btn">Aplicar período</button>
+            <button id="btnLimparFiltro" class="btn secundario">Limpar período</button>
+          </div>
         </div>
 
-        <!-- BLOCO: FILTRO 'IS' (igualdade) -->
-        <div class="linha" style="margin-top:8px; align-items:center;">
-          <label for="filterField">Filtrar por:</label>
-          <select id="filterField" style="margin-left:8px;">
-            <option value="">-- selecionar --</option>
-            <option value="codigo">Código</option>
-            <option value="evento">Evento</option>
-            <option value="local">Local</option>
-            <option value="participante">Participante</option>
-            <option value="id">ID do documento</option>
-          </select>
+        <div class="linha" style="margin-top:8px;align-items:center;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;">
+          <div class="campo">
+            <label for="filterField">Filtrar por</label>
+            <select id="filterField">
+              <option value="">-- selecionar --</option>
+              <option value="codigo">Código</option>
+              <option value="evento">Evento</option>
+              <option value="local">Local</option>
+              <option value="participante">Participante</option>
+              <option value="id">ID do documento</option>
+            </select>
+          </div>
 
-          <input id="filterValue" type="text" placeholder="Valor (igualdade)" style="margin-left:8px;" />
+          <div class="campo">
+            <label for="filterValue">Valor (igualdade)</label>
+            <input id="filterValue" type="text" placeholder="Valor (igualdade)" />
+          </div>
 
-          <button id="btnAplicarIs" class="btn" style="margin-left:8px;">Aplicar IS</button>
-          <button id="btnLimparIs" class="btn secundario" style="margin-left:6px;">Limpar IS</button>
+          <div style="display:flex;gap:8px;align-items:end;">
+            <button id="btnAplicarIs" class="btn">Aplicar IS</button>
+            <button id="btnLimparIs" class="btn secundario">Limpar IS</button>
+          </div>
 
-          <!-- Observação sobre índices do Firestore -->
-          <small style="display:block; margin-top:6px; color:#666;">
-            Nota: combinar filtros 'is' (where) com ordenação por data pode exigir criação de índice composto no Firebase; se aparecer erro no console, clique no link fornecido pelo erro para criar o índice.
-          </small>
+          <div style="align-self:end;">
+            <small style="color:var(--muted);">Combinação where+order pode exigir índice no Firebase.</small>
+          </div>
         </div>
       </div>
 
-      <div class="table-responsive" style="margin-top:12px;">
-        <table id="tabelaEventos" class="table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Data</th>
-              <th>Evento</th>
-              <th>Local</th>
-              <th>Endereço</th>
-              <th>Horario</th>
-              <th>Formato</th>
-              <th>Participante</th>
-              <th>Pauta</th>
-              <th>Comentário</th>
-              <th>Ações</th>
+      <div class="table-responsive">
+        <table id="tabelaEventos" class="table" role="table" aria-label="Tabela de eventos">
+          <thead role="rowgroup">
+            <tr role="row">
+              <th role="columnheader">ID</th>
+              <th role="columnheader">Data</th>
+              <th role="columnheader">Evento</th>
+              <th role="columnheader">Local</th>
+              <th role="columnheader">Endereço</th>
+              <th role="columnheader">Horario</th>
+              <th role="columnheader">Formato</th>
+              <th role="columnheader">Participante</th>
+              <th role="columnheader">Pauta</th>
+              <th role="columnheader">Comentário</th>
+              <th role="columnheader">Ações</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             <!-- preenchido dinamicamente -->
           </tbody>
         </table>
       </div>
 
-      <!-- (Botões de PDF foram movidos para o menu superior) -->
     </section>
 
     <!-- Fotos salvas (ao editar) -->
     <section id="fotos-section" class="card" style="margin-top:16px;">
       <h3>Fotos do evento</h3>
-      <div id="fotosAtuaisWrapper" class="oculto">
-        <div id="fotosAtuais"></div>
+      <div id="fotosAtuaisWrapper" class="oculto fotos-atuais">
+        <div id="fotosAtuais" class="fotos-grid"></div>
       </div>
     </section>
-
   </main>
 
-  <footer class="rodape">
+  <footer class="rodape" role="contentinfo">
     Agenda Incubadora IFPR / PMP — verifique as instruções no console se ocorrer erro.
   </footer>
 </body>
