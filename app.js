@@ -912,7 +912,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-// Substitua apenas a função carregarEventos() existente por esta implementação
+// Substitua apenas a função carregarEventos() existente por esta versão
 async function carregarEventos() {
   if (!tabelaBody) return;
 
@@ -920,151 +920,116 @@ async function carregarEventos() {
   eventosCache = [];
 
   try {
-    // Ordem padrão: mais recente primeiro
     const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
     const order = orderParam === "asc" ? "asc" : "desc";
 
-    // Base da query
     let queryRef = db.collection("eventos");
 
-    // Leitura dos filtros UI
     const fieldRaw = (filterField?.value || "").trim();
     const valRaw = (filterValue?.value || "").trim();
     const de = (filtroDe?.value || "").trim();
     const ate = (filtroAte?.value || "").trim();
 
-    // Se houver filtro "IS", tentamos construir where apropriado.
-    // Se escolheram "ID do documento" (fieldRaw === 'id'), tentamos doc(id) primeiro.
-    let appliedServerFilter = false;
-
     if (fieldRaw && valRaw) {
       if (fieldRaw === "id") {
-        // 1) tenta buscar por document id
+        // tenta buscar por document id
         const docSnap = await db.collection("eventos").doc(valRaw).get();
         if (docSnap.exists) {
           eventosCache.push({ id: docSnap.id, ...docSnap.data() });
           renderTabela();
           return;
         }
-        // 2) não encontrou doc: se valor for número, tenta buscar por campo 'codigo'
+        // se não achar doc id, tenta codigo numérico
         const n = Number(valRaw);
         if (!Number.isNaN(n)) {
           queryRef = queryRef.where("codigo", "==", n);
-          appliedServerFilter = true;
         } else {
-          // 3) fallback: busca por igualdade no campo 'evento' (porque usuário pode ter copiado o "nome" que aparece)
+          // fallback: busca por igualdade no campo 'evento'
           queryRef = queryRef.where("evento", "==", valRaw);
-          appliedServerFilter = true;
         }
       } else {
-        // Campos normais (codigo, evento, local, participante...)
         let value = valRaw;
         if (fieldRaw === "codigo") {
           const n = Number(valRaw);
           if (!Number.isNaN(n)) value = n;
-          else {
-            // valor inválido para código (texto) => não irá combinar com número; ainda tentamos a query (vai retornar vazio)
-            // preservamos value como texto para que where seja executado (provavelmente sem resultados)
-          }
         }
         queryRef = queryRef.where(fieldRaw, "==", value);
-        appliedServerFilter = true;
       }
     }
 
-    // Aplica filtros de período (se houver). Note: combinar where+orderBy pode exigir índice composto no Firestore.
-    if (de) {
-      // assume formato yyyy-mm-dd guardado no campo dataInicio
-      queryRef = queryRef.where("dataInicio", ">=", de);
-    }
-    if (ate) {
-      queryRef = queryRef.where("dataInicio", "<=", ate);
-    }
+    if (de) queryRef = queryRef.where("dataInicio", ">=", de);
+    if (ate) queryRef = queryRef.where("dataInicio", "<=", ate);
 
-    // Aplica ordenação por dataInicio
-    // Observação: se aplicou filtros que o Firestore não permite sem índice, o get() pode lançar erro
     queryRef = queryRef.orderBy("dataInicio", order);
 
-    // Tenta executar a query no servidor
     try {
       const snap = await queryRef.get();
-      snap.forEach((doc) => {
-        eventosCache.push({ id: doc.id, ...doc.data() });
-      });
+      snap.forEach((doc) => eventosCache.push({ id: doc.id, ...doc.data() }));
       renderTabela();
       return;
     } catch (serverErr) {
-      // Possível causa: required composite index / permission / outra falha
-      console.warn("Query Firestore falhou — aplicando fallback de filtragem no cliente. Erro:", serverErr);
-      // Continua para fallback client-side
-    }
+      console.warn("Firestore query failed:", serverErr);
+      // detecta se é erro que pede índice composto
+      const msg = (serverErr && serverErr.message) ? serverErr.message : "";
+      const indexUrlMatch = msg.match(/https?:\/\/[^\s)]+/);
+      const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
 
-    // ========== FALLBACK CLIENT-SIDE ==========
-    // Busca um lote de documentos recentes (limitar para não explodir)
-    const FETCH_LIMIT = 800; // ajuste se precisar (cuidado com leituras em produção)
-    const snapAll = await db.collection("eventos").orderBy("dataInicio", "desc").limit(FETCH_LIMIT).get();
-    const docs = snapAll.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-    let filtered = docs;
-
-    // Aplica filtro IS em cliente
-    if (fieldRaw && valRaw) {
-      const v = valRaw.toString().trim();
-      if (fieldRaw === "id") {
-        // primeiro tenta doc id igual
-        filtered = filtered.filter((d) => d.id === v);
-        if (filtered.length === 0) {
-          // se vazio e valor numérico, filtra por codigo numérico
-          const n = Number(v);
-          if (!Number.isNaN(n)) {
-            filtered = docs.filter((d) => d.codigo === n);
-          } else {
-            // fallback: busca por campo 'evento' == valor (case-insensitive)
-            filtered = docs.filter((d) => (d.evento || "").toString().toLowerCase() === v.toLowerCase());
-          }
-        }
-      } else if (fieldRaw === "codigo") {
-        const n = Number(v);
-        if (!Number.isNaN(n)) {
-          filtered = filtered.filter((d) => d.codigo === n);
-        } else {
-          // comparação por string (caso dados venham como string)
-          filtered = filtered.filter((d) => (d.codigo || "").toString() === v);
+      if (msg.includes("requires an index") || indexUrl) {
+        // informa o usuário e oferece abrir o link
+        const openLink = confirm("A consulta que você tentou executar exige um índice composto no Firestore. Deseja abrir a página para criar o índice agora?\n\n(Se não criar, o filtro será feito localmente, possivelmente lento)");
+        if (openLink && indexUrl) {
+          window.open(indexUrl, "_blank");
+        } else if (!indexUrl) {
+          alert("Firestore solicitou um índice, verifique o console para o link ou acesse Firestore Console → Indexes.");
         }
       } else {
-        // campos texto: compare case-insensitive (igualdade)
-        filtered = filtered.filter((d) => ((d[fieldRaw] || "").toString().toLowerCase() === v.toLowerCase()));
+        // qualquer outro erro
+        console.error("Erro no get() do Firestore:", serverErr);
+        alert("Erro ao consultar Firestore. Veja o console (F12).");
       }
-    }
 
-    // Aplica filtros de período no cliente (se houver)
-    if (de) {
-      filtered = filtered.filter((d) => {
-        if (!d.dataInicio) return false;
-        return d.dataInicio >= de;
+      // Fallback client-side (busca um lote e filtra localmente)
+      const FETCH_LIMIT = 800;
+      const snapAll = await db.collection("eventos").orderBy("dataInicio", "desc").limit(FETCH_LIMIT).get();
+      const docs = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      let filtered = docs;
+      if (fieldRaw && valRaw) {
+        const v = valRaw.toString().trim().toLowerCase();
+        if (fieldRaw === "id") {
+          filtered = filtered.filter(d => d.id === valRaw);
+          if (!filtered.length) {
+            const n = Number(valRaw);
+            if (!Number.isNaN(n)) filtered = docs.filter(d => d.codigo === n);
+            else filtered = docs.filter(d => (d.evento || "").toString().toLowerCase() === v);
+          }
+        } else if (fieldRaw === "codigo") {
+          const n = Number(valRaw);
+          if (!Number.isNaN(n)) filtered = filtered.filter(d => d.codigo === n);
+          else filtered = filtered.filter(d => (d.codigo || "").toString() === valRaw);
+        } else {
+          filtered = filtered.filter(d => ((d[fieldRaw] || "").toString().toLowerCase() === v));
+        }
+      }
+
+      if (de) filtered = filtered.filter(d => d.dataInicio && d.dataInicio >= de);
+      if (ate) filtered = filtered.filter(d => d.dataInicio && d.dataInicio <= ate);
+
+      filtered.sort((a, b) => {
+        const da = a.dataInicio || "";
+        const dbb = b.dataInicio || "";
+        if (da === dbb) return 0;
+        if (order === "asc") return da < dbb ? -1 : 1;
+        return da > dbb ? -1 : 1;
       });
-    }
-    if (ate) {
-      filtered = filtered.filter((d) => {
-        if (!d.dataInicio) return false;
-        return d.dataInicio <= ate;
-      });
-    }
 
-    // Ordena o array conforme 'order' (dataInicio)
-    filtered.sort((a, b) => {
-      const da = a.dataInicio || "";
-      const dbb = b.dataInicio || "";
-      if (da === dbb) return 0;
-      if (order === "asc") return da < dbb ? -1 : 1;
-      return da > dbb ? -1 : 1;
-    });
-
-    eventosCache = filtered;
-    renderTabela();
+      eventosCache = filtered;
+      renderTabela();
+      return;
+    }
   } catch (err) {
     console.error("Erro inesperado em carregarEventos():", err);
-    alert("Erro ao carregar eventos. Veja o console (F12) para detalhes.");
+    alert("Erro ao carregar eventos. Veja o console (F12).");
   }
 }
 
