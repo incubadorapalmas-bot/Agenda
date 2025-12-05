@@ -129,8 +129,17 @@
         <div class="linha">
           <div class="campo" style="grid-column: 1 / -1;">
             <label for="fotos">Fotos (arraste ou selecione)</label>
-            <div id="dropArea" class="drop-area" tabindex="0">Arraste as fotos aqui ou <span class="drop-area__link">clique para selecionar</span></div>
-            <input id="fotos" type="file" accept="image/*,image/heic,image/heif" multiple style="display:none;" />
+            <div id="dropArea" class="drop-area" tabindex="0">
+              Arraste as fotos aqui ou
+              <span class="drop-area__link">clique para selecionar</span>
+            </div>
+            <input
+              id="fotos"
+              type="file"
+              accept="image/*,image/heic,image/heif"
+              multiple
+              style="display:none;"
+            />
             <div id="novasFotosPreview" class="preview"></div>
           </div>
         </div>
@@ -141,7 +150,9 @@
             <input id="codigo" type="text" readonly />
           </div>
 
-          <div style="grid-column: 2 / -1; display:flex; align-items:end; justify-content:flex-end;">
+          <div
+            style="grid-column: 2 / -1; display:flex; align-items:end; justify-content:flex-end;"
+          >
             <div class="botoes" role="group" aria-label="Ações do formulário">
               <button id="btnSalvar" type="submit" class="btn primario">Salvar evento</button>
               <button id="btnCancelarEdicao" type="button" class="btn secundario oculto">Cancelar</button>
@@ -149,6 +160,14 @@
           </div>
         </div>
       </form>
+
+      <!-- Fotos salvas do evento ATUAL (agora logo abaixo do formulário) -->
+      <section id="fotos-section" style="margin-top:16px;">
+        <h3>Fotos do evento</h3>
+        <div id="fotosAtuaisWrapper" class="oculto fotos-atuais">
+          <div id="fotosAtuais" class="fotos-grid"></div>
+        </div>
+      </section>
     </section>
 
     <!-- FILTROS E LISTA -->
@@ -207,6 +226,7 @@
           <thead role="rowgroup">
             <tr role="row">
               <th role="columnheader">ID</th>
+              <th role="columnheader">Foto</th>
               <th role="columnheader">Data</th>
               <th role="columnheader">Evento</th>
               <th role="columnheader">Local</th>
@@ -223,15 +243,6 @@
             <!-- preenchido dinamicamente -->
           </tbody>
         </table>
-      </div>
-
-    </section>
-
-    <!-- Fotos salvas (ao editar) -->
-    <section id="fotos-section" class="card" style="margin-top:16px;">
-      <h3>Fotos do evento</h3>
-      <div id="fotosAtuaisWrapper" class="oculto fotos-atuais">
-        <div id="fotosAtuais" class="fotos-grid"></div>
       </div>
     </section>
   </main>

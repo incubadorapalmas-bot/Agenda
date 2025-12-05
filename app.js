@@ -1,33 +1,20 @@
 // app.js - Agenda Incubadora IFPR/PMP
-// Versão corrigida: mantive sua lógica e corrigi dois problemas principais:
-// 1) Removi o bloco "upload" que estava fora do escopo (usava fotosInput/idEvento fora do submit) — causava ReferenceError/execução indevida.
-// 2) Adicionei a função convertDataUrlIfHeic(...) (necessária para exibição/PDF) e garanti fallback seguro.
-// NÃO removi a lógica de redução/heic/renumeração/filtros/PDF — apenas corrigi o que quebrou a execução.
-// Substitua totalmente o app.js pelo conteúdo abaixo.
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // ========= INICIALIZAÇÃO jsPDF (mais robusto) =========
-  const jsPDF =
-    (window.jspdf && window.jspdf.jsPDF) || window.jsPDF || null;
-
+  // ========= INICIALIZAÇÃO jsPDF =========
+  const jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF || null;
   if (!jsPDF) {
-    console.warn(
-      "jsPDF não encontrado. Verifique se o script do jsPDF está incluído ANTES do app.js."
-    );
+    console.warn("jsPDF não encontrado. Verifique se o script do jsPDF está incluído ANTES do app.js.");
   }
 
   // ========= Firestore =========
   if (typeof firebase === "undefined" || !firebase.firestore) {
-    console.error(
-      "Firebase Firestore não encontrado. Verifique se os scripts do Firebase foram incluídos corretamente."
-    );
-    // Não prossegue sem Firestore
+    console.error("Firebase Firestore não encontrado. Verifique se os scripts do Firebase foram incluídos corretamente.");
     return;
   }
-
   const db = firebase.firestore();
 
-  // ========= Logos para PDFs (carregadas da pasta raiz do projeto) =========
+  // ========= Logos =========
   const logoPmpImg = new Image();
   logoPmpImg.src = "PMP.png";
   const logoIfprImg = new Image();
@@ -35,57 +22,39 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logoSebraeImg = new Image();
   logoSebraeImg.src = "Sebrae.png";
 
-  // ========= CONSTANTE DO CDN DO HEIC2ANY (ajustado) =========
-  // Lista de fontes conhecidas do heic2any.
-  // As três primeiras são CDN que realmente existem; a última é opcional/local.
+  // ========= HEIC2ANY: fontes =========
   const HEIC2ANY_SOURCES = [
-    // jsDelivr (versão 0.0.4 do heic2any original)
     "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js",
-    // unpkg (mesma versão)
     "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js",
-    // cdnjs (versão 0.0.1, também funcional)
     "https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.1/index.min.js",
-    // opcional: arquivo local se você quiser hospedar em /vendor
     "/vendor/heic2any.min.js"
   ];
 
-  // Tenta extrair a função correta do objeto global (várias formas de export)
   function getHeic2anyFromGlobal() {
     const g = window.heic2any || window.__heic2anyFn;
-
     if (!g) return null;
-
     if (typeof g === "function") return g;
     if (g && typeof g.default === "function") return g.default;
     if (g && typeof g.heic2any === "function") return g.heic2any;
-
     return null;
   }
 
   function ensureHeic2any() {
-    // 1) Já temos a função resolvida e cacheada
     if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
       return Promise.resolve(window.__heic2anyFn);
     }
 
-    // 2) Já existe algo no global (por script carregado antes)
     const existing = getHeic2anyFromGlobal();
     if (existing) {
       window.__heic2anyFn = existing;
       return Promise.resolve(existing);
     }
 
-    // 3) Já existe um carregamento em andamento? reaproveita a mesma Promise
-    if (window.__heic2anyLoading) {
-      return window.__heic2anyLoading;
-    }
+    if (window.__heic2anyLoading) return window.__heic2anyLoading;
 
-    // 4) Inicia um novo processo de carregamento
     window.__heic2anyLoading = new Promise(async (resolve, reject) => {
       for (const src of HEIC2ANY_SOURCES) {
         try {
-          // Se for caminho local ("/vendor/...") e o global já existir,
-          // apenas reaproveita (não precisa injetar script de novo)
           if (src.startsWith("/") && getHeic2anyFromGlobal()) {
             const fnLocal = getHeic2anyFromGlobal();
             if (fnLocal) {
@@ -95,7 +64,6 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
           }
 
-          // Carrega o script dinamicamente
           await new Promise((res, rej) => {
             const s = document.createElement("script");
             s.src = src;
@@ -105,161 +73,35 @@ document.addEventListener("DOMContentLoaded", async () => {
             document.head.appendChild(s);
           });
 
-          // Depois de carregar, tenta extrair a função do global
           const fn = getHeic2anyFromGlobal();
           if (fn) {
             window.__heic2anyFn = fn;
             resolve(fn);
             return;
           } else {
-            console.warn(
-              "[heic2any] Script carregado mas não encontrei export válido em",
-              src
-            );
+            console.warn("[heic2any] Script carregado mas não encontrei export válido em", src);
           }
         } catch (err) {
-          console.warn(
-            "[heic2any] Falha ao carregar de",
-            src,
-            "-",
-            err && err.message ? err.message : err
-          );
-          // Continua para o próximo src
+          console.warn("[heic2any] Falha ao carregar de", src, "-", err && err.message ? err.message : err);
         }
       }
 
-      // Se chegou aqui, nenhuma fonte funcionou
       delete window.__heic2anyLoading;
-      reject(
-        new Error("Nenhuma fonte heic2any disponível (CDNs e /vendor falharam)")
-      );
+      reject(new Error("Nenhuma fonte heic2any disponível (CDNs e /vendor falharam)"));
     });
 
     return window.__heic2anyLoading;
   }
 
-  // ---------- converter diretamente um File HEIC -> JPEG dataURL ----------
-  async function convertHeicFileToJpegDataUrl(file, options = { quality: 0.9 }) {
-    // returns dataURL string (image/jpeg) or "" on failure
-    try {
-      if (!file) return "";
-      // if it's not HEIC just return normal dataURL
-      const name = (file.name || "").toLowerCase();
-      const isHeic =
-        (file.type && file.type.toLowerCase().includes("heic")) ||
-        name.endsWith(".heic") ||
-        name.endsWith(".heif");
-      if (!isHeic) {
-        // fallback: read file to dataURL
-        return await blobToDataURL(file);
-      }
+  // pré-load não bloqueante
+  ensureHeic2any().catch(e =>
+    console.warn("heic2any pré-load falhou:", e && e.message ? e.message : e)
+  );
 
-      // ensure converter
-      const heic = await ensureHeic2any();
-      if (!heic) throw new Error("heic2any indisponível");
-
-      // convert to jpeg blob
-      const converted = await heic({
-        blob: file,
-        toType: "image/jpeg",
-        quality: options.quality || 0.9,
-      });
-      const jpegBlob =
-        converted instanceof Blob
-          ? converted
-          : Array.isArray(converted)
-          ? converted[0]
-          : converted;
-      if (!jpegBlob) throw new Error("heic2any retornou vazio");
-
-      // return dataURL
-      const dataUrl = await blobToDataURL(jpegBlob);
-      return dataUrl;
-    } catch (err) {
-      console.warn(
-        "convertHeicFileToJpegDataUrl falhou:",
-        err && err.message ? err.message : err
-      );
-      return "";
-    }
-  }
-
-  // ---------- Atualize fileToCompressedDataUrl para usar convertHeicFileToJpegDataUrl quando for HEIC ----------
-  async function fileToCompressedDataUrl(
-    file,
-    maxWidth = 1280,
-    maxHeight = 720,
-    quality = 0.6
-  ) {
-    return new Promise(async (resolve, reject) => {
-      const processDataUrl = async (dataUrl) => {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            let { width, height } = img;
-            const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
-            const targetWidth = Math.round(width * ratio);
-            const targetHeight = Math.round(height * ratio);
-            const canvas = document.createElement("canvas");
-            canvas.width = targetWidth;
-            canvas.height = targetHeight;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-            const out = canvas.toDataURL("image/jpeg", quality);
-            resolve(out);
-          } catch (errCanvas) {
-            console.warn("Erro ao desenhar no canvas:", errCanvas);
-            resolve(dataUrl); // fallback para original
-          }
-        };
-        img.onerror = (e) => {
-          reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
-        };
-        img.crossOrigin = "anonymous";
-        img.src = dataUrl;
-      };
-
-      try {
-        // If HEIC file, try to convert first to dataURL jpeg
-        if (isHeicFile(file)) {
-          const convertedDataUrl = await convertHeicFileToJpegDataUrl(file, {
-            quality: 0.9,
-          });
-          if (!convertedDataUrl) {
-            // conversion failed — return empty so caller uses fallback
-            return resolve("");
-          }
-          // then resize the converted dataURL
-          return processDataUrl(convertedDataUrl);
-        }
-
-        // not HEIC — just read and resize
-        const reader = new FileReader();
-        reader.onerror = () => reject(reader.error);
-        reader.onload = () => processDataUrl(reader.result);
-        reader.readAsDataURL(file);
-      } catch (err) {
-        reject(err);
-      }
-    });
-  }
-
-  // tentar pré-carregar não bloqueante (melhora chance de conversão)
-  ensureHeic2any().catch((e) => {
-    console.warn(
-      "heic2any pré-load falhou:",
-      e && e.message ? e.message : e
-    );
-  });
-
-  // ========= Utilitários para conversão de dataURLs/blobs =========
-
+  // ========= Utilitários básicos =========
   function dataURLtoBlob(dataurl) {
-    // dataurl: "data:[<mediatype>][;base64],<data>"
     const parts = dataurl.split(",");
-    if (parts.length !== 2) {
-      throw new Error("dataURL inválida");
-    }
+    if (parts.length !== 2) throw new Error("dataURL inválida");
     const meta = parts[0];
     const b64 = parts[1];
     const mimeMatch = meta.match(/data:(.*?)(;base64)?$/);
@@ -285,21 +127,53 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!src || typeof src !== "string") return false;
     const s = src.toLowerCase();
     if (s.startsWith("data:")) {
-      return (
-        s.startsWith("data:image/heic") ||
-        s.startsWith("data:image/heif") ||
-        s.includes("heic")
-      );
+      return s.startsWith("data:image/heic") || s.startsWith("data:image/heif") || s.includes("heic");
     }
-    // also check if the url ends with .heic/.heif
     return s.endsWith(".heic") || s.endsWith(".heif");
   }
 
-  // ========= NOVOS HELPERS PARA REDUÇÃO E SALVAMENTO SEGURO =========
-  // Não removi nada antigo, apenas adicionei helpers com nomes compatíveis.
+  function isHeicFile(file) {
+    if (!file) return false;
+    const type = (file.type || "").toLowerCase();
+    const name = (file.name || "").toLowerCase();
+    return (
+      type === "image/heic" ||
+      type === "image/heif" ||
+      name.endsWith(".heic") ||
+      name.endsWith(".heif")
+    );
+  }
 
-  function imageBlobToDataUrl(blob) {
-    return blobToDataURL(blob);
+  async function convertHeicFileToJpegDataUrl(file, options = { quality: 0.9 }) {
+    try {
+      if (!file) return "";
+      const name = (file.name || "").toLowerCase();
+      const isHeic =
+        (file.type && file.type.toLowerCase().includes("heic")) ||
+        name.endsWith(".heic") ||
+        name.endsWith(".heif");
+      if (!isHeic) {
+        return await blobToDataURL(file);
+      }
+      const heic = await ensureHeic2any();
+      if (!heic) throw new Error("heic2any indisponível");
+      const converted = await heic({
+        blob: file,
+        toType: "image/jpeg",
+        quality: options.quality || 0.9
+      });
+      const jpegBlob =
+        converted instanceof Blob
+          ? converted
+          : Array.isArray(converted)
+          ? converted[0]
+          : converted;
+      if (!jpegBlob) throw new Error("heic2any retornou vazio");
+      return await blobToDataURL(jpegBlob);
+    } catch (err) {
+      console.warn("convertHeicFileToJpegDataUrl falhou:", err && err.message ? err.message : err);
+      return "";
+    }
   }
 
   function dataUrlByteSize(dataUrl) {
@@ -329,8 +203,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           reject(err);
         }
       };
-      img.onerror = (e) =>
-        reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
+      img.onerror = e => reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
       img.crossOrigin = "anonymous";
       img.src = dataUrl;
     });
@@ -344,7 +217,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       qualityStep = 0.05,
       maxWidth = 1280,
       maxHeight = 960,
-      downscaleStep = 0.9,
+      downscaleStep = 0.9
     } = options;
 
     let dataUrl = originalDataUrl;
@@ -353,12 +226,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     let quality = startQuality;
     while (quality >= minQuality) {
       try {
-        const shrunk = await resizeDataUrl(
-          dataUrl,
-          maxWidth,
-          maxHeight,
-          quality
-        );
+        const shrunk = await resizeDataUrl(dataUrl, maxWidth, maxHeight, quality);
         if (dataUrlByteSize(shrunk) <= maxBytes) return shrunk;
         dataUrl = shrunk;
       } catch (err) {
@@ -373,52 +241,80 @@ document.addEventListener("DOMContentLoaded", async () => {
     while (loops < 12) {
       currentMaxW = Math.max(100, Math.round(currentMaxW * downscaleStep));
       currentMaxH = Math.max(100, Math.round(currentMaxH * downscaleStep));
-      quality = Math.max(
-        minQuality,
-        startQuality * Math.pow(downscaleStep, loops)
-      );
+      quality = Math.max(minQuality, startQuality * Math.pow(downscaleStep, loops));
       try {
-        const shrunk = await resizeDataUrl(
-          dataUrl,
-          currentMaxW,
-          currentMaxH,
-          quality
-        );
+        const shrunk = await resizeDataUrl(dataUrl, currentMaxW, currentMaxH, quality);
         if (dataUrlByteSize(shrunk) <= maxBytes) return shrunk;
         dataUrl = shrunk;
       } catch (err) {
-        console.warn(
-          "Erro ao reduzir dimensões:",
-          currentMaxW,
-          currentMaxH,
-          err
-        );
+        console.warn("Erro ao reduzir dimensões:", currentMaxW, currentMaxH, err);
       }
       loops++;
     }
 
-    // última tentativa: retorna a melhor que temos
     return dataUrl;
   }
 
-  /* ---------- FUNÇÃO A: fileToReducedDataUrlForFirestore (mais agressiva) ---------- */
+  async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, quality = 0.6) {
+    return new Promise(async (resolve, reject) => {
+      const processDataUrl = dataUrl => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            let { width, height } = img;
+            const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+            const targetWidth = Math.round(width * ratio);
+            const targetHeight = Math.round(height * ratio);
+            const canvas = document.createElement("canvas");
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+            const out = canvas.toDataURL("image/jpeg", quality);
+            resolve(out);
+          } catch (errCanvas) {
+            console.warn("Erro ao desenhar no canvas:", errCanvas);
+            resolve(dataUrl);
+          }
+        };
+        img.onerror = e => reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
+        img.crossOrigin = "anonymous";
+        img.src = dataUrl;
+      };
+
+      try {
+        if (isHeicFile(file)) {
+          const convertedDataUrl = await convertHeicFileToJpegDataUrl(file, { quality: 0.9 });
+          if (!convertedDataUrl) return resolve("");
+          return processDataUrl(convertedDataUrl);
+        }
+
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => processDataUrl(reader.result);
+        reader.readAsDataURL(file);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   async function fileToReducedDataUrlForFirestore(file, opts = {}) {
     const defaultOpts = {
       startMaxWidth: 1280,
       startMaxHeight: 960,
       startQuality: 0.8,
-      maxBytes: 350 * 1024, // 350KB por padrão (ajuste se quiser)
+      maxBytes: 350 * 1024,
       minQuality: 0.32,
       qualityStep: 0.05,
       maxWidth: 1200,
       maxHeight: 900,
       downscaleStep: 0.86,
-      finalAggressiveMaxBytes: 1048000, // segurança: abaixo do limite de 1_048_576
+      finalAggressiveMaxBytes: 1_048_000
     };
     const cfg = Object.assign({}, defaultOpts, opts);
 
     try {
-      // 1) tenta compressão/resize "normal"
       const start = await fileToCompressedDataUrl(
         file,
         cfg.startMaxWidth,
@@ -426,7 +322,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         cfg.startQuality
       );
 
-      // 2) shrink iterativo até cfg.maxBytes
       let reduced = await shrinkDataUrlToLimit(start, {
         maxBytes: cfg.maxBytes,
         startQuality: cfg.startQuality,
@@ -434,33 +329,24 @@ document.addEventListener("DOMContentLoaded", async () => {
         qualityStep: cfg.qualityStep,
         maxWidth: cfg.maxWidth,
         maxHeight: cfg.maxHeight,
-        downscaleStep: cfg.downscaleStep,
+        downscaleStep: cfg.downscaleStep
       });
 
-      // 3) se ainda for muito grande, faz uma tentativa AGRESSIVA (mais downscale e menor qualidade)
       if (dataUrlByteSize(reduced) > cfg.finalAggressiveMaxBytes) {
         try {
-          // opção: reduzir para largura 800 e qualidade 0.56 -> re-encodar e testar
           reduced = await resizeDataUrl(reduced, 800, 600, 0.56);
           if (dataUrlByteSize(reduced) > cfg.finalAggressiveMaxBytes) {
             reduced = await resizeDataUrl(reduced, 640, 480, 0.48);
           }
         } catch (errAgg) {
-          console.warn(
-            "Tentativa agressiva de reduzir image falhou:",
-            errAgg
-          );
+          console.warn("Tentativa agressiva de reduzir image falhou:", errAgg);
         }
       }
 
       return reduced;
     } catch (err) {
-      console.warn(
-        "fileToReducedDataUrlForFirestore falhou, fallback para leitura direta:",
-        err
-      );
+      console.warn("fileToReducedDataUrlForFirestore falhou, fallback para leitura direta:", err);
       try {
-        // fallback simples: tentar ler direto como dataURL (pode ser grande)
         return await blobToDataURL(file);
       } catch (e) {
         console.error("Falha ao gerar dataURL via fallback:", e);
@@ -469,32 +355,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // ---------- ADICIONEI: convertDataUrlIfHeic (necessário para exibir/converter dataURLs HEIC) ----------
   async function convertDataUrlIfHeic(src) {
     try {
       if (!src || typeof src !== "string") return src;
-      // cache conversions
       window.__heicConvertedCache = window.__heicConvertedCache || {};
-      if (window.__heicConvertedCache[src])
-        return window.__heicConvertedCache[src];
+      if (window.__heicConvertedCache[src]) return window.__heicConvertedCache[src];
 
-      // If it's a data URL with HEIC
       if (isDataUrlHeic(src)) {
-        // if heic2any available convert
         try {
           const heic = await ensureHeic2any();
           const blob = dataURLtoBlob(src);
-          const converted = await heic({
-            blob,
-            toType: "image/jpeg",
-            quality: 0.9,
-          });
+          const converted = await heic({ blob, toType: "image/jpeg", quality: 0.9 });
           const jpegBlob =
             converted instanceof Blob
               ? converted
-              : (Array.isArray(converted) && converted.length
-                  ? converted[0]
-                  : converted);
+              : Array.isArray(converted) && converted.length
+              ? converted[0]
+              : converted;
           if (!jpegBlob) throw new Error("heic2any retornou vazio");
           const jpg = await blobToDataURL(jpegBlob);
           window.__heicConvertedCache[src] = jpg;
@@ -505,28 +382,19 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
       }
 
-      // If it's a URL ending with .heic/.heif
-      if (
-        typeof src === "string" &&
-        (src.toLowerCase().endsWith(".heic") ||
-          src.toLowerCase().endsWith(".heif"))
-      ) {
+      if (typeof src === "string" && (src.toLowerCase().endsWith(".heic") || src.toLowerCase().endsWith(".heif"))) {
         try {
           const resp = await fetch(src);
           if (!resp.ok) throw new Error("fetch falhou: " + resp.status);
           const blob = await resp.blob();
           const heic = await ensureHeic2any();
-          const converted = await heic({
-            blob,
-            toType: "image/jpeg",
-            quality: 0.9,
-          });
+          const converted = await heic({ blob, toType: "image/jpeg", quality: 0.9 });
           const jpegBlob =
             converted instanceof Blob
               ? converted
-              : (Array.isArray(converted) && converted.length
-                  ? converted[0]
-                  : converted);
+              : Array.isArray(converted) && converted.length
+              ? converted[0]
+              : converted;
           if (!jpegBlob) throw new Error("heic2any retornou vazio (remoto)");
           const jpg = await blobToDataURL(jpegBlob);
           window.__heicConvertedCache[src] = jpg;
@@ -544,19 +412,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // ========= RENUMERAR: ordena por data ASC (mais antigo = 1) =========
+  // ========= RENUMERAÇÃO =========
   async function renumerarEventosCodigoSequencial() {
     try {
-      console.log(
-        "Iniciando renumeração dos eventos (mais antigo = codigo 1)..."
-      );
-
-      // Busca TODOS os eventos, do mais antigo para o mais recente (asc)
-      const snap = await db
-        .collection("eventos")
-        .orderBy("dataInicio", "asc")
-        .get();
-
+      console.log("Iniciando renumeração dos eventos (mais antigo = codigo 1)...");
+      const snap = await db.collection("eventos").orderBy("dataInicio", "asc").get();
       if (snap.empty) {
         console.log("Nenhum evento encontrado para renumerar.");
         return 0;
@@ -567,38 +427,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       let ops = 0;
       const commits = [];
 
-      snap.forEach((doc) => {
-        batch.update(doc.ref, { codigo: codigo });
+      snap.forEach(doc => {
+        batch.update(doc.ref, { codigo });
         codigo++;
         ops++;
-
         if (ops >= 450) {
-          commits.push(
-            batch.commit().catch((err) => {
-              console.error(
-                "Erro no commit parcial durante renumeração:",
-                err
-              );
-            })
-          );
+          commits.push(batch.commit().catch(err => {
+            console.error("Erro no commit parcial durante renumeração:", err);
+          }));
           batch = db.batch();
           ops = 0;
         }
       });
 
       if (ops > 0) {
-        commits.push(
-          batch.commit().catch((err) => {
-            console.error(
-              "Erro no commit final durante renumeração:",
-              err
-            );
-          })
-        );
+        commits.push(batch.commit().catch(err => {
+          console.error("Erro no commit final durante renumeração:", err);
+        }));
       }
 
       await Promise.all(commits);
-
       console.log("Renumeração concluída com sucesso! Total:", codigo - 1);
       return codigo - 1;
     } catch (err) {
@@ -607,27 +455,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // ========= Detectar se códigos estão invertidos e corrigir (com confirmação) =========
   async function detectAndFixInvertedCodes() {
     try {
       const [mostRecentSnap, oldestSnap, maxCodigoSnap] = await Promise.all([
         db.collection("eventos").orderBy("dataInicio", "desc").limit(1).get(),
         db.collection("eventos").orderBy("dataInicio", "asc").limit(1).get(),
-        db.collection("eventos").orderBy("codigo", "desc").limit(1).get(),
+        db.collection("eventos").orderBy("codigo", "desc").limit(1).get()
       ]);
 
       if (mostRecentSnap.empty || oldestSnap.empty) {
-        console.log(
-          "Não há eventos suficientes para avaliar ordenação de códigos."
-        );
+        console.log("Não há eventos suficientes para avaliar ordenação de códigos.");
         return;
       }
 
       const mostRecentDoc = mostRecentSnap.docs[0];
       const oldestDoc = oldestSnap.docs[0];
-      const maxCodigoDoc = maxCodigoSnap.empty
-        ? null
-        : maxCodigoSnap.docs[0];
+      const maxCodigoDoc = maxCodigoSnap.empty ? null : maxCodigoSnap.docs[0];
 
       const mostRecentCodigo = mostRecentDoc.data().codigo;
       const oldestCodigo = oldestDoc.data().codigo;
@@ -664,10 +507,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       const total = await renumerarEventosCodigoSequencial();
-      alert(
-        "Renumeração automática concluída. Total de eventos renumerados: " +
-          total
-      );
+      alert("Renumeração automática concluída. Total de eventos renumerados: " + total);
     } catch (err) {
       console.error("Erro na detecção/correção de códigos:", err);
       alert("Erro ao verificar/renumerar códigos. Veja o console (F12).");
@@ -685,7 +525,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   const btnFiltrar = document.getElementById("btnFiltrar");
   const btnLimparFiltro = document.getElementById("btnLimparFiltro");
 
-  // filtro IS UI (se presente no index.html)
   const filterField = document.getElementById("filterField");
   const filterValue = document.getElementById("filterValue");
   const btnAplicarIs = document.getElementById("btnAplicarIs");
@@ -697,7 +536,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const tabelaBody = document.querySelector("#tabelaEventos tbody");
 
   const campoEventoId = document.getElementById("eventoId");
-  const campoCodigo = document.getElementById("codigo"); // campo Código na tela
+  const campoCodigo = document.getElementById("codigo");
   const formTituloModo = document.getElementById("formTituloModo");
   const btnSalvar = document.getElementById("btnSalvar");
   const btnCancelarEdicao = document.getElementById("btnCancelarEdicao");
@@ -712,20 +551,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let eventosCache = [];
   let eventoEmEdicaoId = null;
 
-  // ========= HELPER: detectar HEIC/HEIF =========
-  function isHeicFile(file) {
-    if (!file) return false;
-    const type = (file.type || "").toLowerCase();
-    const name = (file.name || "").toLowerCase();
-    return (
-      type === "image/heic" ||
-      type === "image/heif" ||
-      name.endsWith(".heic") ||
-      name.endsWith(".heif")
-    );
-  }
-
-  // ========= THEME TOGGLE (CLARO / ESCURO) =========
+  // ========= THEME =========
   (function initTheme() {
     const html = document.documentElement;
     const temaSalvo = localStorage.getItem("agenda_tema") || "light";
@@ -760,22 +586,22 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ========= Drag & Drop de fotos =========
   if (dropArea && fotosInput) {
-    const preventDefaults = (e) => {
+    const preventDefaults = e => {
       e.preventDefault();
       e.stopPropagation();
     };
 
-    ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
+    ["dragenter", "dragover", "dragleave", "drop"].forEach(eventName => {
       dropArea.addEventListener(eventName, preventDefaults, false);
     });
 
-    ["dragenter", "dragover"].forEach((eventName) => {
+    ["dragenter", "dragover"].forEach(eventName => {
       dropArea.addEventListener(eventName, () => {
         dropArea.classList.add("dragover");
       });
     });
 
-    ["dragleave", "drop"].forEach((eventName) => {
+    ["dragleave", "drop"].forEach(eventName => {
       dropArea.addEventListener(eventName, () => {
         dropArea.classList.remove("dragover");
       });
@@ -783,12 +609,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     dropArea.addEventListener("click", () => fotosInput.click());
 
-    dropArea.addEventListener("drop", (e) => {
+    dropArea.addEventListener("drop", e => {
       const dt = e.dataTransfer;
       const files = dt.files;
       const dataTransfer = new DataTransfer();
 
-      Array.from(files).forEach((file) => {
+      Array.from(files).forEach(file => {
         if (file.type.startsWith("image/") || isHeicFile(file)) {
           dataTransfer.items.add(file);
         }
@@ -801,15 +627,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     fotosInput.addEventListener("change", atualizarPreviewNovasFotos);
   }
 
-  // ========= Preview das novas fotos =========
   function atualizarPreviewNovasFotos() {
     if (!novasFotosPreview || !fotosInput) return;
-
     novasFotosPreview.innerHTML = "";
     const files = fotosInput.files;
     if (!files || !files.length) return;
 
-    Array.from(files).forEach((file) => {
+    Array.from(files).forEach(file => {
       const card = document.createElement("div");
       card.className = "foto-thumb";
 
@@ -845,12 +669,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   function toggleFormDisabled(flag) {
     if (!form) return;
     const elements = form.querySelectorAll("input, select, textarea, button");
-    elements.forEach((el) => (el.disabled = flag));
+    elements.forEach(el => (el.disabled = flag));
   }
 
   function limparFormulario() {
     if (!form) return;
-
     form.reset();
     if (campoEventoId) campoEventoId.value = "";
     if (campoCodigo) {
@@ -863,8 +686,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (fotosAtuaisDiv) fotosAtuaisDiv.innerHTML = "";
     if (fotosAtuaisWrapper) fotosAtuaisWrapper.classList.add("oculto");
 
-    if (formTituloModo)
-      formTituloModo.textContent = "Cadastrar novo evento";
+    if (formTituloModo) formTituloModo.textContent = "Cadastrar novo evento";
     if (btnSalvar) btnSalvar.textContent = "Salvar evento";
     if (btnCancelarEdicao) btnCancelarEdicao.classList.add("oculto");
   }
@@ -876,7 +698,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function preencherFormularioComEvento(ev) {
-    const byId = (id) => document.getElementById(id);
+    const byId = id => document.getElementById(id);
 
     const evento = byId("evento");
     const local = byId("local");
@@ -914,7 +736,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (comentario) comentario.value = ev.comentario || "";
   }
 
-  // ========= Buscar fotos de um evento (para PDF) =========
+  // ========= Fotos de um evento (para PDF e exibição) =========
   async function getFotosEvento(idEvento) {
     const fotos = [];
     try {
@@ -924,21 +746,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         .collection("fotos")
         .get();
 
-      // iterar de forma síncrona (await dentro do laço) para garantir conversões
       for (const docFoto of snap.docs) {
         const data = docFoto.data();
         const { dataUrl, url, legenda } = data;
         let src = dataUrl || url || "";
         if (!src) continue;
 
-        // tenta converter se for dataURL HEIC ou link .heic
         try {
           src = await convertDataUrlIfHeic(src);
         } catch (err) {
-          console.warn(
-            "Falha ao converter foto do evento (seguindo com original):",
-            err
-          );
+          console.warn("Falha ao converter foto do evento (seguindo com original):", err);
         }
 
         fotos.push({ src, legenda: legenda || "" });
@@ -949,7 +766,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     return fotos;
   }
 
-  // ========= Fotos de um evento (já salvas) – MOSTRANDO E EXCLUINDO =========
   async function carregarFotosDoEvento(idEvento) {
     if (!fotosAtuaisDiv || !fotosAtuaisWrapper) return;
 
@@ -969,7 +785,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       fotosAtuaisWrapper.classList.remove("oculto");
 
-      // iterar com for..of para permitir await convert
       for (const docFoto of snap.docs) {
         const { dataUrl, url, legenda } = docFoto.data();
         let src = dataUrl || url || "";
@@ -978,10 +793,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         try {
           src = await convertDataUrlIfHeic(src);
         } catch (err) {
-          console.warn(
-            "Falha ao converter foto para exibição (usando original):",
-            err
-          );
+          console.warn("Falha ao converter foto para exibição (usando original):", err);
         }
 
         const card = document.createElement("div");
@@ -1011,7 +823,6 @@ document.addEventListener("DOMContentLoaded", async () => {
               .doc(docFoto.id)
               .delete();
             card.remove();
-
             if (!fotosAtuaisDiv.querySelector(".foto-thumb")) {
               fotosAtuaisWrapper.classList.add("oculto");
             }
@@ -1034,7 +845,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ========= Abrir edição =========
   async function abrirEdicaoEvento(idEvento) {
     try {
-      let ev = eventosCache.find((e) => e.id === idEvento);
+      let ev = eventosCache.find(e => e.id === idEvento);
 
       if (!ev) {
         const doc = await db.collection("eventos").doc(idEvento).get();
@@ -1044,11 +855,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
         ev = { id: doc.id, ...doc.data() };
 
-        const cacheEv = eventosCache.find((e) => e.id === idEvento);
+        const cacheEv = eventosCache.find(e => e.id === idEvento);
         if (cacheEv) {
           if (cacheEv.codigo !== undefined) ev.codigo = cacheEv.codigo;
-          if (cacheEv.idSequencial !== undefined)
-            ev.idSequencial = cacheEv.idSequencial;
+          if (cacheEv.idSequencial !== undefined) ev.idSequencial = cacheEv.idSequencial;
         }
       }
 
@@ -1059,8 +869,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (formTituloModo) formTituloModo.textContent = "Editando evento";
       if (btnSalvar) btnSalvar.textContent = "Atualizar evento";
-      if (btnCancelarEdicao)
-        btnCancelarEdicao.classList.remove("oculto");
+      if (btnCancelarEdicao) btnCancelarEdicao.classList.remove("oculto");
 
       await carregarFotosDoEvento(idEvento);
 
@@ -1073,75 +882,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ========= Salvar (criar/atualizar) evento + fotos =========
   if (form) {
-    form.addEventListener("submit", async (e) => {
+    form.addEventListener("submit", async e => {
       e.preventDefault();
-
-      // ======= Upload novas fotos em base64 (com conversão HEIC -> JPG e redução) =======
-if (fotosInput && fotosInput.files && fotosInput.files.length) {
-  for (let file of fotosInput.files) {
-    if (!file.type.startsWith("image/") && !isHeicFile(file)) continue;
-
-    try {
-      // Gera dataURL reduzido (max ~350KB por padrão)
-      const reducedDataUrl =
-        await fileToReducedDataUrlForFirestore(file);
-
-      if (!reducedDataUrl) {
-        console.warn("Imagem reduzida vazia, pulando:", file.name);
-        continue;
-      }
-
-      // Cria thumbnail menor para preview (opcional)
-      let thumbnail = reducedDataUrl;
-      try {
-        thumbnail = await resizeDataUrl(
-          reducedDataUrl,
-          420,
-          320,
-          0.65
-        );
-      } catch (thumbErr) {
-        console.warn(
-          "Falha ao criar thumbnail (usando reduzido):",
-          thumbErr
-        );
-        thumbnail = reducedDataUrl;
-      }
-
-      // Salva APENAS os dataURLs reduzidos (evita salvar original HEIC grande)
-      await db
-        .collection("eventos")
-        .doc(idEvento)
-        .collection("fotos")
-        .add({
-          dataUrl: reducedDataUrl,
-          thumbnail,
-          legenda: file.name,
-          criadaEm:
-            firebase.firestore.FieldValue.serverTimestamp(),
-        });
-
-      console.log(
-        "Foto salva (reduzida) no Firestore:",
-        file.name
-      );
-    } catch (errImg) {
-      console.error(
-        "Erro ao processar/salvar imagem:",
-        file.name,
-        errImg
-      );
-      alert(
-        "Erro ao processar a imagem '" +
-          file.name +
-          "'. Se for HEIC, tente exportar para JPG/PNG no celular ou computador."
-      );
-    }
-  }
-}
-// ======= FIM BLOCO ATUALIZADO =======
-
-
 
       const campoEvento = document.getElementById("evento");
       if (!campoEvento || !campoEvento.value.trim()) {
@@ -1160,19 +902,16 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
       const docEvento = {
         evento: eventoTipo,
         local: (document.getElementById("local")?.value || "").trim(),
-        endereco:
-          (document.getElementById("endereco")?.value || "").trim(),
+        endereco: (document.getElementById("endereco")?.value || "").trim(),
         dataInicio,
         dataFim,
         horaInicio: document.getElementById("horaInicio")?.value || "",
         horaFim: document.getElementById("horaFim")?.value || "",
         formato: document.getElementById("formato")?.value || "",
-        participante:
-          (document.getElementById("participante")?.value || "").trim(),
+        participante: (document.getElementById("participante")?.value || "").trim(),
         pauta: (document.getElementById("pauta")?.value || "").trim(),
-        comentario:
-          (document.getElementById("comentario")?.value || "").trim(),
-        atualizadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+        comentario: (document.getElementById("comentario")?.value || "").trim(),
+        atualizadoEm: firebase.firestore.FieldValue.serverTimestamp()
       };
 
       try {
@@ -1181,51 +920,37 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
         let idEvento;
 
         if (eventoEmEdicaoId) {
-          // ATUALIZA: atualiza o documento existente
           idEvento = eventoEmEdicaoId;
           await db.collection("eventos").doc(idEvento).update(docEvento);
         } else {
-          // CRIA: adiciona sem definir 'codigo' aqui (renumeração fará o ajuste)
-          docEvento.criadoEm =
-            firebase.firestore.FieldValue.serverTimestamp();
-
+          docEvento.criadoEm = firebase.firestore.FieldValue.serverTimestamp();
           const docRef = await db.collection("eventos").add(docEvento);
           idEvento = docRef.id;
         }
 
-        // ======= Upload novas fotos em base64 (com conversão HEIC -> JPG e redução) =======
+        // ======= Upload novas fotos (com capaThumb no doc do evento) =======
+        let capaThumb = null;
+        let primeiraFotoProcessada = false;
+
         if (fotosInput && fotosInput.files && fotosInput.files.length) {
           for (let file of fotosInput.files) {
             if (!file.type.startsWith("image/") && !isHeicFile(file)) continue;
 
             try {
-              // Gera dataURL reduzido (max ~350KB por padrão)
-              const reducedDataUrl =
-                await fileToReducedDataUrlForFirestore(file);
-
+              const reducedDataUrl = await fileToReducedDataUrlForFirestore(file);
               if (!reducedDataUrl) {
                 console.warn("Imagem reduzida vazia, pulando:", file.name);
                 continue;
               }
 
-              // Cria thumbnail menor para preview (opcional)
               let thumbnail = reducedDataUrl;
               try {
-                thumbnail = await resizeDataUrl(
-                  reducedDataUrl,
-                  420,
-                  320,
-                  0.65
-                );
+                thumbnail = await resizeDataUrl(reducedDataUrl, 420, 320, 0.65);
               } catch (thumbErr) {
-                console.warn(
-                  "Falha ao criar thumbnail (usando reduzido):",
-                  thumbErr
-                );
+                console.warn("Falha ao criar thumbnail (usando reduzido):", thumbErr);
                 thumbnail = reducedDataUrl;
               }
 
-              // Salva APENAS os dataURLs reduzidos (evita salvar original HEIC grande)
               await db
                 .collection("eventos")
                 .doc(idEvento)
@@ -1234,20 +959,17 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
                   dataUrl: reducedDataUrl,
                   thumbnail,
                   legenda: file.name,
-                  criadaEm:
-                    firebase.firestore.FieldValue.serverTimestamp(),
+                  criadaEm: firebase.firestore.FieldValue.serverTimestamp()
                 });
 
-              console.log(
-                "Foto salva (reduzida) no Firestore:",
-                file.name
-              );
+              console.log("Foto salva (reduzida) no Firestore:", file.name);
+
+              if (!primeiraFotoProcessada) {
+                capaThumb = thumbnail;
+                primeiraFotoProcessada = true;
+              }
             } catch (errImg) {
-              console.error(
-                "Erro ao processar/salvar imagem:",
-                file.name,
-                errImg
-              );
+              console.error("Erro ao processar/salvar imagem:", file.name, errImg);
               alert(
                 "Erro ao processar a imagem '" +
                   file.name +
@@ -1256,9 +978,18 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
             }
           }
         }
-        // ======= FIM BLOCO ATUALIZADO =======
 
-        // Agora renumerar todos os eventos conforme a data (mais antigo = 1, mais recente = N)
+        if (capaThumb) {
+          try {
+            await db.collection("eventos").doc(idEvento).update({
+              capaThumb,
+              capaAtualizadaEm: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (errCapa) {
+            console.warn("Não foi possível salvar capaThumb no evento:", errCapa);
+          }
+        }
+
         await renumerarEventosCodigoSequencial();
 
         alert(
@@ -1281,7 +1012,7 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
     });
   }
 
-  // ========= carregarEventos() =========
+  // ========= Carregar eventos =========
   async function carregarEventos() {
     if (!tabelaBody) return;
 
@@ -1289,9 +1020,7 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
     eventosCache = [];
 
     try {
-      const orderParam = (
-        new URLSearchParams(location.search).get("order") || ""
-      ).toLowerCase();
+      const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
       const order = orderParam === "asc" ? "asc" : "desc";
 
       let queryRef = db.collection("eventos");
@@ -1303,19 +1032,16 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
 
       if (fieldRaw && valRaw) {
         if (fieldRaw === "id") {
-          // tenta buscar por document id
           const docSnap = await db.collection("eventos").doc(valRaw).get();
           if (docSnap.exists) {
             eventosCache.push({ id: docSnap.id, ...docSnap.data() });
             renderTabela();
             return;
           }
-          // se não achar doc id, tenta codigo numérico
           const n = Number(valRaw);
           if (!Number.isNaN(n)) {
             queryRef = queryRef.where("codigo", "==", n);
           } else {
-            // fallback: busca por igualdade no campo 'evento'
             queryRef = queryRef.where("evento", "==", valRaw);
           }
         } else {
@@ -1335,21 +1061,19 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
 
       try {
         const snap = await queryRef.get();
-        snap.forEach((doc) =>
-          eventosCache.push({ id: doc.id, ...doc.data() })
-        );
+        snap.forEach(doc => eventosCache.push({ id: doc.id, ...doc.data() }));
         renderTabela();
         return;
       } catch (serverErr) {
         console.warn("Firestore query failed:", serverErr);
-        const msg =
-          serverErr && serverErr.message ? serverErr.message : "";
+        const msg = (serverErr && serverErr.message) ? serverErr.message : "";
         const indexUrlMatch = msg.match(/https?:\/\/[^\s)]+/);
         const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
 
         if (msg.includes("requires an index") || indexUrl) {
           const openLink = confirm(
-            "A consulta que você tentou executar exige um índice composto no Firestore. Deseja abrir a página para criar o índice agora?\n\n(Se não criar, o filtro será feito localmente, possivelmente lento)"
+            "A consulta que você tentou executar exige um índice composto no Firestore. Deseja abrir a página para criar o índice agora?\n\n" +
+              "(Se não criar, o filtro será feito localmente, possivelmente lento)"
           );
           if (openLink && indexUrl) {
             window.open(indexUrl, "_blank");
@@ -1363,60 +1087,47 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
           alert("Erro ao consultar Firestore. Veja o console (F12).");
         }
 
-        // Fallback client-side (busca um lote e filtra localmente)
         const FETCH_LIMIT = 800;
         const snapAll = await db
           .collection("eventos")
           .orderBy("dataInicio", "desc")
           .limit(FETCH_LIMIT)
           .get();
-        const docs = snapAll.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        }));
+        const docs = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
 
         let filtered = docs;
         if (fieldRaw && valRaw) {
           const v = valRaw.toString().trim().toLowerCase();
           if (fieldRaw === "id") {
-            filtered = filtered.filter((d) => d.id === valRaw);
+            filtered = filtered.filter(d => d.id === valRaw);
             if (!filtered.length) {
               const n = Number(valRaw);
-              if (!Number.isNaN(n))
-                filtered = docs.filter((d) => d.codigo === n);
-              else
-                filtered = docs.filter(
-                  (d) =>
-                    (d.evento || "")
-                      .toString()
-                      .toLowerCase() === v
-                );
+              if (!Number.isNaN(n)) filtered = docs.filter(d => d.codigo === n);
+              else filtered = docs.filter(
+                d =>
+                  (d.evento || "")
+                    .toString()
+                    .toLowerCase() === v
+              );
             }
           } else if (fieldRaw === "codigo") {
             const n = Number(valRaw);
-            if (!Number.isNaN(n))
-              filtered = filtered.filter((d) => d.codigo === n);
-            else
-              filtered = filtered.filter(
-                (d) =>
-                  (d.codigo || "").toString() === valRaw
-              );
+            if (!Number.isNaN(n)) filtered = filtered.filter(d => d.codigo === n);
+            else filtered = filtered.filter(
+              d => (d.codigo || "").toString() === valRaw
+            );
           } else {
             filtered = filtered.filter(
-              (d) =>
-                ((d[fieldRaw] || "").toString().toLowerCase() === v)
+              d =>
+                ((d[fieldRaw] || "")
+                  .toString()
+                  .toLowerCase() === v)
             );
           }
         }
 
-        if (de)
-          filtered = filtered.filter(
-            (d) => d.dataInicio && d.dataInicio >= de
-          );
-        if (ate)
-          filtered = filtered.filter(
-            (d) => d.dataInicio && d.dataInicio <= ate
-          );
+        if (de) filtered = filtered.filter(d => d.dataInicio && d.dataInicio >= de);
+        if (ate) filtered = filtered.filter(d => d.dataInicio && d.dataInicio <= ate);
 
         filtered.sort((a, b) => {
           const da = a.dataInicio || "";
@@ -1444,15 +1155,14 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
     if (!eventosCache.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 11;
-      td.textContent =
-        "Nenhum evento encontrado para o filtro selecionado.";
+      td.colSpan = 12;
+      td.textContent = "Nenhum evento encontrado para o filtro selecionado.";
       tr.appendChild(td);
       tabelaBody.appendChild(tr);
       return;
     }
 
-    eventosCache.forEach((ev) => {
+    eventosCache.forEach(ev => {
       const tr = document.createElement("tr");
       tr.dataset.id = ev.id;
 
@@ -1468,8 +1178,13 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
           ? ev.idSequencial
           : "";
 
+      const fotoHtml = ev.capaThumb
+        ? `<img src="${ev.capaThumb}" alt="Foto do evento" class="mini-foto">`
+        : "";
+
       tr.innerHTML = `
         <td>${displayId}</td>
+        <td>${fotoHtml}</td>
         <td>${ev.dataInicio || ""}</td>
         <td>${ev.evento || ""}</td>
         <td>${ev.local || ""}</td>
@@ -1489,7 +1204,7 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
         </td>
       `;
 
-      tr.addEventListener("click", (e) => {
+      tr.addEventListener("click", e => {
         const isButton = e.target.closest("button");
         if (isButton) return;
         abrirEdicaoEvento(ev.id);
@@ -1498,15 +1213,15 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
       tabelaBody.appendChild(tr);
     });
 
-    document.querySelectorAll(".btn-editar").forEach((btn) =>
-      btn.addEventListener("click", (e) => {
+    document.querySelectorAll(".btn-editar").forEach(btn =>
+      btn.addEventListener("click", e => {
         e.stopPropagation();
         abrirEdicaoEvento(btn.getAttribute("data-id"));
       })
     );
 
-    document.querySelectorAll(".btn-pdf-evento").forEach((btn) =>
-      btn.addEventListener("click", (e) => {
+    document.querySelectorAll(".btn-pdf-evento").forEach(btn =>
+      btn.addEventListener("click", e => {
         e.stopPropagation();
         gerarPdfEventoComFotos(btn.getAttribute("data-id"));
       })
@@ -1514,10 +1229,7 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
   }
 
   // ========= Filtros =========
-  if (btnFiltrar) {
-    btnFiltrar.addEventListener("click", carregarEventos);
-  }
-
+  if (btnFiltrar) btnFiltrar.addEventListener("click", carregarEventos);
   if (btnLimparFiltro) {
     btnLimparFiltro.addEventListener("click", () => {
       if (filtroDe) filtroDe.value = "";
@@ -1527,20 +1239,19 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
   }
 
   if (btnAplicarIs) btnAplicarIs.addEventListener("click", carregarEventos);
-  if (btnLimparIs)
+  if (btnLimparIs) {
     btnLimparIs.addEventListener("click", () => {
       if (filterField) filterField.value = "";
       if (filterValue) filterValue.value = "";
       carregarEventos();
     });
+  }
 
-  // ========= Funções para PDFs (com suporte a imagens convertidas) =========
-
+  // ========= PDFs =========
   function obterDescricaoPeriodo() {
     if (!filtroDe?.value && !filtroAte?.value) {
       return "Todos os eventos cadastrados";
     }
-
     const de = filtroDe.value || "início";
     const ate = filtroAte.value || "data atual";
     return `Período: ${de} até ${ate}`;
@@ -1551,7 +1262,7 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
     const dataStr = hoje.toLocaleDateString("pt-BR");
     const horaStr = hoje.toLocaleTimeString("pt-BR", {
       hour: "2-digit",
-      minute: "2-digit",
+      minute: "2-digit"
     });
 
     doc.setFillColor(5, 30, 45);
@@ -1568,10 +1279,7 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
         doc.addImage(logoSebraeImg, "PNG", 180, 3, 18, 14);
       }
     } catch (e) {
-      console.warn(
-        "Não foi possível adicionar alguma logo no cabeçalho do PDF:",
-        e
-      );
+      console.warn("Não foi possível adicionar alguma logo no cabeçalho do PDF:", e);
     }
 
     doc.setTextColor(255, 255, 255);
@@ -1580,11 +1288,7 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
     doc.text("INSTITUTO FEDERAL DO PARANÁ - CAMPUS PALMAS", 60, 7);
 
     doc.setFontSize(9);
-    doc.text(
-      "Incubadora IFPR / Prefeitura Municipal de Palmas / Sebrae-PR",
-      60,
-      12
-    );
+    doc.text("Incubadora IFPR / Prefeitura Municipal de Palmas / Sebrae-PR", 60, 12);
 
     doc.setFontSize(9);
     doc.text(titulo, 60, 17);
@@ -1600,15 +1304,234 @@ if (fotosInput && fotosInput.files && fotosInput.files.length) {
     doc.line(10, 35, 200, 35);
   }
 
-  // (geração de PDFs usa getFotosEvento que faz conversão quando necessário)
-  // Aqui assumo que você já tem implementarções de:
-  // - gerarPdfEventoComFotos(idEvento)
-  // - e possivelmente PDFs completos/simples usando jsPDF + getFotosEvento
+  async function gerarPdfEventoComFotos(idEvento) {
+    if (!jsPDF) {
+      alert("jsPDF não está disponível. Verifique o script no index.html");
+      return;
+    }
 
-  // ========= Inicialização =========
-  // Primeiro: detectar se os códigos no banco parecem invertidos e oferecer correção.
+    try {
+      let ev = eventosCache.find(e => e.id === idEvento);
+      if (!ev) {
+        const docSnap = await db.collection("eventos").doc(idEvento).get();
+        if (!docSnap.exists) {
+          alert("Evento não encontrado para PDF.");
+          return;
+        }
+        ev = { id: docSnap.id, ...docSnap.data() };
+      }
+
+      const doc = new jsPDF("p", "mm", "a4");
+      gerarCabecalhoCorporativo(doc, "Relatório de Evento - Agenda Incubadora IFPR / PMP");
+
+      let y = 42;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.text(`Evento: ${ev.evento || ""}`, 10, y);
+      y += 6;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+
+      const linhas = [
+        `Data: ${ev.dataInicio || ""} ${ev.dataFim && ev.dataFim !== ev.dataInicio ? " até " + ev.dataFim : ""}`,
+        `Horário: ${(ev.horaInicio || "")} ${(ev.horaInicio || ev.horaFim) ? " - " : ""} ${(ev.horaFim || "")}`,
+        `Local: ${ev.local || ""}`,
+        `Endereço: ${ev.endereco || ""}`,
+        `Formato: ${ev.formato || ""}`,
+        `Participante/Responsável: ${ev.participante || ""}`
+      ];
+      linhas.forEach(l => {
+        doc.text(l, 10, y);
+        y += 6;
+      });
+
+      if (ev.pauta) {
+        doc.setFont("helvetica", "bold");
+        doc.text("Pauta:", 10, y);
+        y += 5;
+        doc.setFont("helvetica", "normal");
+        const splitPauta = doc.splitTextToSize(ev.pauta, 190);
+        doc.text(splitPauta, 10, y);
+        y += splitPauta.length * 5 + 4;
+      }
+
+      if (ev.comentario) {
+        doc.setFont("helvetica", "bold");
+        doc.text("Comentário:", 10, y);
+        y += 5;
+        doc.setFont("helvetica", "normal");
+        const splitComent = doc.splitTextToSize(ev.comentario, 190);
+        doc.text(splitComent, 10, y);
+        y += splitComent.length * 5 + 4;
+      }
+
+      const fotos = await getFotosEvento(ev.id);
+      if (fotos.length) {
+        doc.addPage();
+        gerarCabecalhoCorporativo(doc, "Fotos do Evento");
+        let fy = 42;
+        const imgW = 80;
+        const imgH = 60;
+        let col = 0;
+
+        for (const foto of fotos) {
+          if (col >= 2) {
+            col = 0;
+            fy += imgH + 10;
+          }
+          if (fy + imgH > 280) {
+            doc.addPage();
+            gerarCabecalhoCorporativo(doc, "Fotos do Evento (cont.)");
+            fy = 42;
+            col = 0;
+          }
+          const fx = 15 + col * (imgW + 10);
+          try {
+            doc.addImage(foto.src, "JPEG", fx, fy, imgW, imgH);
+          } catch (e) {
+            console.warn("Erro ao adicionar foto ao PDF:", e);
+          }
+          if (foto.legenda) {
+            doc.setFontSize(8);
+            doc.text(doc.splitTextToSize(foto.legenda, imgW), fx, fy + imgH + 4);
+          }
+          col++;
+        }
+      }
+
+      const nome = `evento-${ev.codigo || ev.id}.pdf`;
+      doc.save(nome);
+    } catch (err) {
+      console.error("Erro ao gerar PDF do evento:", err);
+      alert("Erro ao gerar PDF deste evento. Veja o console (F12).");
+    }
+  }
+
+  async function gerarPdfSimplesLista() {
+    if (!jsPDF) {
+      alert("jsPDF não está disponível. Verifique o script no index.html");
+      return;
+    }
+
+    if (!eventosCache.length) {
+      await carregarEventos();
+    }
+
+    const doc = new jsPDF("p", "mm", "a4");
+    gerarCabecalhoCorporativo(doc, "Agenda Simplificada de Eventos");
+
+    let y = 42;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("ID", 10, y);
+    doc.text("Data", 25, y);
+    doc.text("Evento", 50, y);
+    doc.text("Local", 120, y);
+    y += 6;
+
+    doc.setFont("helvetica", "normal");
+    eventosCache.forEach(ev => {
+      if (y > 280) {
+        doc.addPage();
+        gerarCabecalhoCorporativo(doc, "Agenda Simplificada de Eventos (cont.)");
+        y = 42;
+      }
+      const id = ev.codigo != null ? String(ev.codigo) : (ev.idSequencial != null ? String(ev.idSequencial) : "");
+      doc.text(id, 10, y);
+      doc.text(ev.dataInicio || "", 25, y);
+      const evento = (ev.evento || "").substring(0, 40);
+      doc.text(evento, 50, y);
+      const local = (ev.local || "").substring(0, 30);
+      doc.text(local, 120, y);
+      y += 6;
+    });
+
+    doc.save("agenda-simples.pdf");
+  }
+
+  async function gerarPdfCompletoLista() {
+    if (!jsPDF) {
+      alert("jsPDF não está disponível. Verifique o script no index.html");
+      return;
+    }
+
+    if (!eventosCache.length) {
+      await carregarEventos();
+    }
+
+    const doc = new jsPDF("p", "mm", "a4");
+    gerarCabecalhoCorporativo(doc, "Relatório Completo de Eventos");
+
+    let y = 42;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+
+    for (const ev of eventosCache) {
+      if (y > 260) {
+        doc.addPage();
+        gerarCabecalhoCorporativo(doc, "Relatório Completo de Eventos (cont.)");
+        y = 42;
+      }
+      const id = ev.codigo != null ? String(ev.codigo) : (ev.idSequencial != null ? String(ev.idSequencial) : "");
+      doc.setFont("helvetica", "bold");
+      doc.text(`ID ${id} - ${ev.dataInicio || ""} - ${ev.evento || ""}`, 10, y);
+      y += 5;
+
+      doc.setFont("helvetica", "normal");
+      const linhas = [
+        `Local: ${ev.local || ""}`,
+        `Endereço: ${ev.endereco || ""}`,
+        `Horário: ${(ev.horaInicio || "")} ${(ev.horaInicio || ev.horaFim) ? " - " : ""} ${(ev.horaFim || "")}`,
+        `Formato: ${ev.formato || ""}`,
+        `Participante/Responsável: ${ev.participante || ""}`
+      ];
+      linhas.forEach(l => {
+        doc.text(l, 10, y);
+        y += 5;
+      });
+
+      if (ev.pauta) {
+        doc.setFont("helvetica", "bold");
+        doc.text("Pauta:", 10, y);
+        y += 4;
+        doc.setFont("helvetica", "normal");
+        const txt = doc.splitTextToSize(ev.pauta, 190);
+        doc.text(txt, 10, y);
+        y += txt.length * 4;
+      }
+
+      if (ev.comentario) {
+        doc.setFont("helvetica", "bold");
+        doc.text("Comentário:", 10, y);
+        y += 4;
+        doc.setFont("helvetica", "normal");
+        const txt2 = doc.splitTextToSize(ev.comentario, 190);
+        doc.text(txt2, 10, y);
+        y += txt2.length * 4;
+      }
+
+      y += 6;
+      doc.setDrawColor(200);
+      doc.line(10, y, 200, y);
+      y += 4;
+    }
+
+    doc.save("agenda-completa.pdf");
+  }
+
+  if (btnPdfSimples) {
+    btnPdfSimples.addEventListener("click", () => {
+      gerarPdfSimplesLista();
+    });
+  }
+  if (btnPdfCompleto) {
+    btnPdfCompleto.addEventListener("click", () => {
+      gerarPdfCompletoLista();
+    });
+  }
+
+  // ========= Inicialização geral =========
   await detectAndFixInvertedCodes();
-
-  // Em seguida: carregar a lista (exibe data mais recente primeiro)
   await carregarEventos();
 });

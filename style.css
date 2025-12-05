@@ -424,6 +424,14 @@ small {
   background: rgba(15, 23, 42, 0.02);
 }
 
+.mini-foto {
+  max-width: 80px;
+  max-height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+
 html[data-theme="dark"] .fotos-atuais {
   background: rgba(15, 23, 42, 0.7);
 }
