@@ -227,30 +227,143 @@ document.addEventListener("DOMContentLoaded", async () => {
     return dataUrl;
   }
 
-  async function fileToReducedDataUrlForFirestore(file, opts = {}) {
-    // Usa o fileToCompressedDataUrl já existente como ponto de partida (ele já converte HEIC quando possível)
-    try {
-      const start = await fileToCompressedDataUrl(file, opts.startMaxWidth || 1280, opts.startMaxHeight || 960, opts.startQuality || 0.8);
-      const reduced = await shrinkDataUrlToLimit(start, {
-        maxBytes: opts.maxBytes || 350 * 1024,
-        startQuality: opts.startQuality || 0.8,
-        minQuality: opts.minQuality || 0.36,
-        qualityStep: opts.qualityStep || 0.05,
-        maxWidth: opts.maxWidth || 1200,
-        maxHeight: opts.maxHeight || 900,
-        downscaleStep: opts.downscaleStep || 0.86,
-      });
-      return reduced;
-    } catch (err) {
-      console.warn("fileToReducedDataUrlForFirestore falhou, tentando leitura direta:", err);
+/* ---------- FUNÇÃO A: fileToReducedDataUrlForFirestore (mais agressiva) ---------- */
+async function fileToReducedDataUrlForFirestore(file, opts = {}) {
+  const defaultOpts = {
+    startMaxWidth: 1280,
+    startMaxHeight: 960,
+    startQuality: 0.8,
+    maxBytes: 350 * 1024, // 350KB por padrão (ajuste se quiser)
+    minQuality: 0.32,
+    qualityStep: 0.05,
+    maxWidth: 1200,
+    maxHeight: 900,
+    downscaleStep: 0.86,
+    finalAggressiveMaxBytes: 1048000 // segurança: abaixo do limite de 1_048_576
+  };
+  const cfg = Object.assign({}, defaultOpts, opts);
+
+  try {
+    // 1) tenta compressão/resize "normal"
+    const start = await fileToCompressedDataUrl(file, cfg.startMaxWidth, cfg.startMaxHeight, cfg.startQuality);
+
+    // 2) shrink iterativo até cfg.maxBytes
+    let reduced = await shrinkDataUrlToLimit(start, {
+      maxBytes: cfg.maxBytes,
+      startQuality: cfg.startQuality,
+      minQuality: cfg.minQuality,
+      qualityStep: cfg.qualityStep,
+      maxWidth: cfg.maxWidth,
+      maxHeight: cfg.maxHeight,
+      downscaleStep: cfg.downscaleStep,
+    });
+
+    // 3) se ainda for muito grande, faz uma tentativa AGRESSIVA (mais downscale e menor qualidade)
+    if (dataUrlByteSize(reduced) > cfg.finalAggressiveMaxBytes) {
       try {
-        return await blobToDataURL(file);
-      } catch (e) {
-        console.error("Falha final ao gerar dataURL da imagem:", e);
-        return "";
+        // opção: reduzir para largura 800 e qualidade 0.48 -> re-encodar e testar
+        reduced = await resizeDataUrl(reduced, 800, 600, 0.56);
+        if (dataUrlByteSize(reduced) > cfg.finalAggressiveMaxBytes) {
+          reduced = await resizeDataUrl(reduced, 640, 480, 0.48);
+        }
+      } catch (errAgg) {
+        console.warn("Tentativa agressiva de reduzir image falhou:", errAgg);
+      }
+    }
+
+    return reduced;
+  } catch (err) {
+    console.warn("fileToReducedDataUrlForFirestore falhou, fallback para leitura direta:", err);
+    try {
+      // fallback simples: tentar ler direto como dataURL (pode ser grande)
+      return await blobToDataURL(file);
+    } catch (e) {
+      console.error("Falha ao gerar dataURL via fallback:", e);
+      return "";
+    }
+  }
+}
+
+/* ---------- FUNÇÃO B: bloco de upload no submit (substitui o bloco que gravava dataUrl diretamente) ---------- */
+/*
+  Substitua o bloco que gravava:
+    await db.collection("eventos").doc(idEvento).collection("fotos").add({ dataUrl, legenda, criadaEm });
+  por este bloco abaixo.
+*/
+if (fotosInput && fotosInput.files && fotosInput.files.length) {
+  for (let file of fotosInput.files) {
+    if (!file.type.startsWith("image/") && !isHeicFile(file)) continue;
+
+    try {
+      // 1) tenta gerar dataURL reduzido
+      const reducedDataUrl = await fileToReducedDataUrlForFirestore(file);
+
+      if (!reducedDataUrl) {
+        console.warn("Imagem reduziu para vazio; pulando:", file.name);
+        continue;
+      }
+
+      // 2) se, por algum motivo, ainda for maior que limite do Firestore (~1_048_576), tomamos decisão:
+      const SIZE_LIMIT = 1048487; // margem abaixo de 1 MiB
+      if (dataUrlByteSize(reducedDataUrl) > SIZE_LIMIT) {
+        // ultima tentativa: gerar apenas thumbnail (muito pequena) e salvar apenas thumbnail + flag
+        let thumb = reducedDataUrl;
+        try {
+          thumb = await resizeDataUrl(reducedDataUrl, 420, 320, 0.55);
+        } catch (thumbErr) {
+          console.warn("Falha ao criar thumbnail reduzida:", thumbErr);
+        }
+
+        await db
+          .collection("eventos")
+          .doc(idEvento)
+          .collection("fotos")
+          .add({
+            dataUrl: "", // não salvamos a imagem completa
+            thumbnail: thumb || "",
+            legenda: file.name,
+            criadaEm: firebase.firestore.FieldValue.serverTimestamp(),
+            note: "original_too_large_saved_thumbnail_only"
+          });
+
+        console.warn("Arquivo muito grande para Firestore; salvei apenas thumbnail. Nome:", file.name);
+        continue;
+      }
+
+      // 3) caso normal: gravar dataUrl reduzido + thumbnail pequena
+      let thumbnail = reducedDataUrl;
+      try {
+        // safe thumbnail
+        thumbnail = await resizeDataUrl(reducedDataUrl, 420, 320, 0.65);
+      } catch (thumbErr) {
+        thumbnail = reducedDataUrl;
+      }
+
+      await db
+        .collection("eventos")
+        .doc(idEvento)
+        .collection("fotos")
+        .add({
+          dataUrl: reducedDataUrl,
+          thumbnail,
+          legenda: file.name,
+          criadaEm: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+
+      console.log("Foto salva (reduzida) no Firestore:", file.name);
+    } catch (errImg) {
+      console.error("Erro ao processar a imagem '" + file.name + "':", errImg);
+      // Mostrar mensagem clara pro usuário sobre HEIC/conversão
+      if (errImg && /heic2any/i.test(String(errImg))) {
+        alert("Não foi possível converter HEIC para JPG no navegador. Verifique conexão com o CDN heic2any ou converta a foto para JPG no seu dispositivo antes de enviar.");
+      } else if (errImg && /longer than/i.test(String(errImg))) {
+        alert("A imagem '" + file.name + "' é muito grande para salvar no Firestore. Converta para JPG e reduza a resolução antes de enviar, ou habilite Storage.");
+      } else {
+        alert("Erro ao processar a imagem '" + file.name + "'. Veja o console para detalhes.");
       }
     }
   }
+}
 
   // ========= RENUMERAR: ordena por data ASC (mais antigo = 1) =========
   async function renumerarEventosCodigoSequencial() {
