@@ -1,214 +1,172 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR" data-theme="light">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <title>Agenda Incubadora IFPR / PMP</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- CSS -->
-  <link rel="stylesheet" href="style.css" />
+  <!-- estilos -->
+  <link rel="stylesheet" href="styles.css" />
 
-  <!-- Firebase (ajusta as versões se já estiver usando outras) -->
+  <!-- Firebase (SDK v8 compat) -->
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  <!-- opcional analytics:
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-analytics.js"></script>
+  -->
 
-  <!-- jsPDF -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-  <!-- heic2any (CONVERSÃO HEIC -> JPG) -->
-  <!-- Importante: sem "defer" e ANTES do app.js -->
-  <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
-
-  <!-- Configuração do Firebase -->
+  <!-- Seu firebase-config.js (deve estar no repo; carregue após firebase-app.js) -->
   <script src="firebase-config.js"></script>
 
-  <!-- Tema (dark / light) -->
-  <script src="theme.js" defer></script>
+  <!-- jsPDF (usado para gerar PDFs) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-  <!-- App -->
+  <!-- theme.js (separado, leve) -->
+  <script src="theme.js"></script>
+
+  <!-- app.js (substitua por este novo arquivo entregue por mim) -->
   <script src="app.js" defer></script>
 </head>
 
 <body>
-  <!-- TOPO / CABEÇALHO -->
   <header class="topo">
     <div class="container topo__conteudo">
-      <div class="topo__branding">
-        <div class="topo__logos">
-          <img src="PMP.png" alt="Prefeitura de Palmas" class="logo" />
-          <img src="IFPR.png" alt="IFPR" class="logo" />
-          <img src="Sebrae.png" alt="Incubadora IFPR/PMP" class="logo" />
-        </div>
-        <div>
-          <h1>Agenda Incubadora IFPR / PMP</h1>
-          <p class="subtitulo">Controle de eventos, fotos e relatórios gerenciais em PDF</p>
-        </div>
+      <div class="topo__logos">
+        <img src="PMP.png" alt="Prefeitura de Palmas" class="logo" />
+        <img src="IFPR.png" alt="IFPR" class="logo" />
+        <img src="Sebrae.png" alt="Sebrae" class="logo" />
       </div>
-
-      <div class="topo__acoes">
-        <!-- BOTÕES DE PDF NO CABEÇALHO -->
-        <button id="btnPdfCompleto" class="btn primario">
-          Relatório completo
-        </button>
-        <button id="btnPdfSimples" class="btn secundario">
-          Agenda simplificada
-        </button>
-
-        <!-- Botão de tema -->
-        <button id="btnToggleTema" class="btn toggle-tema" title="Alternar tema">
-          🌓
-        </button>
+      <div>
+        <h1>Agenda Incubadora IFPR / PMP</h1>
+        <p class="subtitulo">Controle de eventos, fotos e relatórios em PDF</p>
       </div>
     </div>
   </header>
 
   <main class="container principal">
-    <!-- CARD FORMULÁRIO -->
+    <!-- FORMULÁRIO -->
     <section id="form-section" class="card">
       <h2 id="formTituloModo">Cadastrar novo evento</h2>
-      <p class="subtexto">
-        Registre atendimentos, orientações, reuniões e outras ações da incubadora.
-      </p>
-
       <form id="eventoForm">
         <input type="hidden" id="eventoId" />
 
-   
-
         <div class="linha">
-          <div class="campo">
-            <label for="evento">Tipo de evento</label>
-            <select id="evento" required>
-              <option value="">Selecione...</option>
-              <option>Orientação</option>
-              <option>Atendimento</option>
-              <option>Alinhamento</option>
-              <option>Reunião</option>
-              <option>Participação</option>
-              <option>Visita Técnica</option>
-              <option>Outro</option>
-            </select>
-          </div>
-
-          <div class="campo">
-            <label for="local">Local</label>
-            <input type="text" id="local" />
-          </div>
-
-          <div class="campo">
-            <label for="endereco">Endereço</label>
-            <input type="text" id="endereco" />
-          </div>
+          <label for="evento">Tipo de evento</label>
+          <input id="evento" type="text" required />
         </div>
 
         <div class="linha">
-          <div class="campo">
-            <label for="dataInicio">Data início</label>
-            <input type="date" id="dataInicio" />
-          </div>
-          <div class="campo">
-            <label for="dataFim">Data fim</label>
-            <input type="date" id="dataFim" />
-          </div>
-          <div class="campo">
-            <label for="formato">Formato</label>
-            <select id="formato">
-              <option>Presencial</option>
-              <option>Online</option>
-              <option>Híbrido</option>
-            </select>
-          </div>
+          <label for="local">Local</label>
+          <input id="local" type="text" />
         </div>
 
         <div class="linha">
-          <div class="campo">
-            <label for="horaInicio">Horário início</label>
-            <input type="time" id="horaInicio" />
-          </div>
-          <div class="campo">
-            <label for="horaFim">Horário fim</label>
-            <input type="time" id="horaFim" />
-          </div>
-          <div class="campo">
-            <label for="participante">Participante / responsável</label>
-            <input type="text" id="participante" />
-          </div>
+          <label for="endereco">Endereço</label>
+          <input id="endereco" type="text" />
         </div>
 
-        <div class="campo">
+        <div class="linha">
+          <label for="dataInicio">Data início</label>
+          <input id="dataInicio" type="date" />
+        </div>
+        <div class="linha">
+          <label for="dataFim">Data fim</label>
+          <input id="dataFim" type="date" />
+        </div>
+
+        <div class="linha">
+          <label for="horaInicio">Hora início</label>
+          <input id="horaInicio" type="time" />
+        </div>
+        <div class="linha">
+          <label for="horaFim">Hora fim</label>
+          <input id="horaFim" type="time" />
+        </div>
+
+        <div class="linha">
+          <label for="formato">Formato</label>
+          <select id="formato">
+            <option>Presencial</option>
+            <option>Online</option>
+            <option>Híbrido</option>
+          </select>
+        </div>
+
+        <div class="linha">
+          <label for="participante">Participante / Responsável</label>
+          <input id="participante" type="text" />
+        </div>
+
+        <div class="linha">
           <label for="pauta">Pauta</label>
-          <textarea id="pauta" rows="2"></textarea>
+          <textarea id="pauta" rows="3"></textarea>
         </div>
 
-        <div class="campo">
+        <div class="linha">
           <label for="comentario">Comentário</label>
-          <textarea id="comentario" rows="3"></textarea>
+          <textarea id="comentario" rows="2"></textarea>
         </div>
 
-             <div class="campo">
-          <label for="codigo">Código</label>
-          <input
-            type="number"
-            id="codigo"
-            min="1"
-            step="1"
-          />
-          <small>Use este código para referência rápida ao evento.</small>
+        <div class="linha">
+          <label for="fotos">Fotos (arraste ou selecione)</label>
+          <div id="dropArea" class="drop-area">Arraste as fotos aqui ou clique</div>
+          <input id="fotos" type="file" accept="image/*,image/heic,image/heif" multiple style="display:none;" />
+          <div id="novasFotosPreview" class="preview"></div>
         </div>
 
-        <!-- FOTOS -->
-        <div class="campo">
-          <label>Fotos do evento</label>
-          <div id="dropArea" class="drop-area">
-            Arraste e solte as fotos aqui ou <span class="drop-area__link">clique para selecionar</span>
-          </div>
-          <!-- aceitamos image/* e HEIC explicitamente -->
-          <input type="file" id="fotos" accept="image/*,.heic,.heif" multiple hidden />
-          <div id="novasFotosPreview" class="novas-fotos"></div>
+        <div class="linha">
+          <label for="codigo">Código (apenas leitura após salvar)</label>
+          <input id="codigo" type="text" readonly />
         </div>
 
-        <div id="fotosAtuaisWrapper" class="fotos-atuais oculto">
-          <div class="fotos-atuais__titulo">Fotos já cadastradas para este evento:</div>
-          <div id="fotosAtuais" class="fotos-grid"></div>
-        </div>
-
-        <div class="botoes-form">
-          <button type="submit" id="btnSalvar" class="btn primario">
-            Salvar evento
-          </button>
-          <button type="button" id="btnCancelarEdicao" class="btn secundario oculto">
-            Cancelar edição
-          </button>
+        <div class="botoes">
+          <button id="btnSalvar" type="submit" class="btn primario">Salvar evento</button>
+          <button id="btnCancelarEdicao" type="button" class="btn secundario oculto">Cancelar</button>
         </div>
       </form>
     </section>
 
-    <!-- CARD LISTA / TABELA -->
-    <section id="lista-section" class="card">
-      <div class="cabecalho-lista">
-        <div>
-          <h2>Eventos cadastrados</h2>
-          <p class="subtexto">
-            Clique em uma linha ou em “Editar / Fotos” para alterar o relatório do evento.
-          </p>
+    <!-- FILTROS E LISTA -->
+    <section id="lista-section" class="card" style="margin-top:16px;">
+      <h2>Eventos</h2>
+
+      <div class="filtros">
+        <div class="linha">
+          <label for="filtroDe">De</label>
+          <input id="filtroDe" type="date" />
+          <label for="filtroAte" style="margin-left:8px;">Até</label>
+          <input id="filtroAte" type="date" />
+
+          <button id="btnFiltrar" class="btn" style="margin-left:8px;">Aplicar período</button>
+          <button id="btnLimparFiltro" class="btn secundario" style="margin-left:6px;">Limpar período</button>
         </div>
 
-        <div class="filtros">
-          <label>
-            De:
-            <input type="date" id="filtroDe" />
-          </label>
-          <label>
-            Até:
-            <input type="date" id="filtroAte" />
-          </label>
-          <button type="button" id="btnFiltrar" class="btn primario">Filtrar</button>
-          <button type="button" id="btnLimparFiltro" class="btn secundario">Limpar</button>
+        <!-- BLOCO: FILTRO 'IS' (igualdade) -->
+        <div class="linha" style="margin-top:8px; align-items:center;">
+          <label for="filterField">Filtrar por:</label>
+          <select id="filterField" style="margin-left:8px;">
+            <option value="">-- selecionar --</option>
+            <option value="codigo">Código</option>
+            <option value="evento">Evento</option>
+            <option value="local">Local</option>
+            <option value="participante">Participante</option>
+            <option value="id">ID do documento</option>
+          </select>
+
+          <input id="filterValue" type="text" placeholder="Valor (igualdade)" style="margin-left:8px;" />
+
+          <button id="btnAplicarIs" class="btn" style="margin-left:8px;">Aplicar IS</button>
+          <button id="btnLimparIs" class="btn secundario" style="margin-left:6px;">Limpar IS</button>
+
+          <!-- Observação sobre índices do Firestore -->
+          <small style="display:block; margin-top:6px; color:#666;">
+            Nota: combinar filtros 'is' (where) com ordenação por data pode exigir criação de índice composto no Firebase; se aparecer erro no console, clique no link fornecido pelo erro para criar o índice.
+          </small>
         </div>
       </div>
 
-      <div class="tabela-container">
-        <table id="tabelaEventos">
+      <div class="table-responsive" style="margin-top:12px;">
+        <table id="tabelaEventos" class="table">
           <thead>
             <tr>
               <th>ID</th>
@@ -216,28 +174,38 @@
               <th>Evento</th>
               <th>Local</th>
               <th>Endereço</th>
-              <th>Horário</th>
+              <th>Horario</th>
               <th>Formato</th>
               <th>Participante</th>
               <th>Pauta</th>
               <th>Comentário</th>
-              <th class="acao-col">Ações</th>
+              <th>Ações</th>
             </tr>
           </thead>
           <tbody>
-            <!-- preenchido via app.js -->
+            <!-- preenchido dinamicamente -->
           </tbody>
         </table>
       </div>
 
-      <div class="relatorios">
-        <span>Relatórios gerais: use os botões no cabeçalho.</span>
+      <div style="margin-top:12px;">
+        <button id="btnPdfCompleto" class="btn">Gerar PDF Completo</button>
+        <button id="btnPdfSimples" class="btn secundario">Gerar PDF Simples</button>
       </div>
     </section>
+
+    <!-- Fotos salvas (ao editar) -->
+    <section id="fotos-section" class="card" style="margin-top:16px;">
+      <h3>Fotos do evento</h3>
+      <div id="fotosAtuaisWrapper" class="oculto">
+        <div id="fotosAtuais"></div>
+      </div>
+    </section>
+
   </main>
 
   <footer class="rodape">
-    Agenda Incubadora IFPR / PMP — Firebase Firestore
+    Agenda Incubadora IFPR / PMP — verifique as instruções no console se ocorrer erro.
   </footer>
 </body>
 </html>
