@@ -35,256 +35,222 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logoSebraeImg = new Image();
   logoSebraeImg.src = "Sebrae.png";
 
-  // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
- // Substitua o bloco que define HEIC2ANY_SRC e a função ensureHeic2any por este:
+  // ========= CONSTANTE DO CDN DO HEIC2ANY (ajustado) =========
+  // Lista de fontes conhecidas do heic2any.
+  // As três primeiras são CDN que realmente existem; a última é opcional/local.
+  const HEIC2ANY_SOURCES = [
+    // jsDelivr (versão 0.0.4 do heic2any original)
+    "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js",
+    // unpkg (mesma versão)
+    "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js",
+    // cdnjs (versão 0.0.1, também funcional)
+    "https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.1/index.min.js",
+    // opcional: arquivo local se você quiser hospedar em /vendor
+    "/vendor/heic2any.min.js"
+  ];
 
-// Lista de fontes conhecidas do heic2any.
-// As três primeiras são CDN que realmente existem; a última é opcional/local.
-const HEIC2ANY_SOURCES = [
-  // jsDelivr (versão 0.0.4 do heic2any original)
-  "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js",
-  // unpkg (mesma versão)
-  "https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js",
-  // cdnjs (versão 0.0.1, também funcional)
-  "https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.1/index.min.js",
-  // opcional: arquivo local se você quiser hospedar em /vendor
-  "/vendor/heic2any.min.js"
-];
+  // Tenta extrair a função correta do objeto global (várias formas de export)
+  function getHeic2anyFromGlobal() {
+    const g = window.heic2any || window.__heic2anyFn;
 
-// Tenta extrair a função correta do objeto global (várias formas de export)
-function getHeic2anyFromGlobal() {
-  const g = window.heic2any || window.__heic2anyFn;
+    if (!g) return null;
 
-  if (!g) return null;
+    if (typeof g === "function") return g;
+    if (g && typeof g.default === "function") return g.default;
+    if (g && typeof g.heic2any === "function") return g.heic2any;
 
-  if (typeof g === "function") return g;
-  if (g && typeof g.default === "function") return g.default;
-  if (g && typeof g.heic2any === "function") return g.heic2any;
-
-  return null;
-}
-
-function ensureHeic2any() {
-  // 1) Já temos a função resolvida e cacheada
-  if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
-    return Promise.resolve(window.__heic2anyFn);
+    return null;
   }
 
-  // 2) Já existe algo no global (por script carregado antes)
-  const existing = getHeic2anyFromGlobal();
-  if (existing) {
-    window.__heic2anyFn = existing;
-    return Promise.resolve(existing);
-  }
+  function ensureHeic2any() {
+    // 1) Já temos a função resolvida e cacheada
+    if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
+      return Promise.resolve(window.__heic2anyFn);
+    }
 
-  // 3) Já existe um carregamento em andamento? reaproveita a mesma Promise
-  if (window.__heic2anyLoading) {
+    // 2) Já existe algo no global (por script carregado antes)
+    const existing = getHeic2anyFromGlobal();
+    if (existing) {
+      window.__heic2anyFn = existing;
+      return Promise.resolve(existing);
+    }
+
+    // 3) Já existe um carregamento em andamento? reaproveita a mesma Promise
+    if (window.__heic2anyLoading) {
+      return window.__heic2anyLoading;
+    }
+
+    // 4) Inicia um novo processo de carregamento
+    window.__heic2anyLoading = new Promise(async (resolve, reject) => {
+      for (const src of HEIC2ANY_SOURCES) {
+        try {
+          // Se for caminho local ("/vendor/...") e o global já existir,
+          // apenas reaproveita (não precisa injetar script de novo)
+          if (src.startsWith("/") && getHeic2anyFromGlobal()) {
+            const fnLocal = getHeic2anyFromGlobal();
+            if (fnLocal) {
+              window.__heic2anyFn = fnLocal;
+              resolve(fnLocal);
+              return;
+            }
+          }
+
+          // Carrega o script dinamicamente
+          await new Promise((res, rej) => {
+            const s = document.createElement("script");
+            s.src = src;
+            s.async = true;
+            s.onload = () => res();
+            s.onerror = () => rej(new Error("Falha ao carregar " + src));
+            document.head.appendChild(s);
+          });
+
+          // Depois de carregar, tenta extrair a função do global
+          const fn = getHeic2anyFromGlobal();
+          if (fn) {
+            window.__heic2anyFn = fn;
+            resolve(fn);
+            return;
+          } else {
+            console.warn(
+              "[heic2any] Script carregado mas não encontrei export válido em",
+              src
+            );
+          }
+        } catch (err) {
+          console.warn(
+            "[heic2any] Falha ao carregar de",
+            src,
+            "-",
+            err && err.message ? err.message : err
+          );
+          // Continua para o próximo src
+        }
+      }
+
+      // Se chegou aqui, nenhuma fonte funcionou
+      delete window.__heic2anyLoading;
+      reject(
+        new Error("Nenhuma fonte heic2any disponível (CDNs e /vendor falharam)")
+      );
+    });
+
     return window.__heic2anyLoading;
   }
 
-  // 4) Inicia um novo processo de carregamento
-  window.__heic2anyLoading = new Promise(async (resolve, reject) => {
-    for (const src of HEIC2ANY_SOURCES) {
-      try {
-        // Se for caminho local ("/vendor/...") e o global já existir,
-        // apenas reaproveita (não precisa injetar script de novo)
-        if (src.startsWith("/") && getHeic2anyFromGlobal()) {
-          const fnLocal = getHeic2anyFromGlobal();
-          if (fnLocal) {
-            window.__heic2anyFn = fnLocal;
-            resolve(fnLocal);
-            return;
-          }
-        }
-
-        // Carrega o script dinamicamente
-        await new Promise((res, rej) => {
-          const s = document.createElement("script");
-          s.src = src;
-          s.async = true;
-          s.onload = () => res();
-          s.onerror = () => rej(new Error("Falha ao carregar " + src));
-          document.head.appendChild(s);
-        });
-
-        // Depois de carregar, tenta extrair a função do global
-        const fn = getHeic2anyFromGlobal();
-        if (fn) {
-          window.__heic2anyFn = fn;
-          resolve(fn);
-          return;
-        } else {
-          console.warn(
-            "[heic2any] Script carregado mas não encontrei export válido em",
-            src
-          );
-        }
-      } catch (err) {
-        console.warn(
-          "[heic2any] Falha ao carregar de",
-          src,
-          "-",
-          err && err.message ? err.message : err
-        );
-        // Continua para o próximo src
-      }
-    }
-
-    // Se chegou aqui, nenhuma fonte funcionou
-    delete window.__heic2anyLoading;
-    reject(
-      new Error("Nenhuma fonte heic2any disponível (CDNs e /vendor falharam)")
-    );
-  });
-
-  return window.__heic2anyLoading;
-}
-
-                            function ensureHeic2any() {
-                              if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
-                                return Promise.resolve(window.__heic2anyFn);
-                              }
-
-                              if (window.heic2any) {
-                                const g = window.heic2any;
-                                const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
-                                if (fn) {
-                                  window.__heic2anyFn = fn;
-                                  return Promise.resolve(fn);
-                                }
-                              }
-
-                              if (window.__heic2anyLoading) return window.__heic2anyLoading;
-
-                              window.__heic2anyLoading = new Promise(async (resolve, reject) => {
-                                for (const src of HEIC2ANY_SOURCES) {
-                                  try {
-                                    // if already global (via <script src="/vendor/...">) pick it
-                                    if (src.startsWith("/") && (window.heic2any || window.__heic2anyFn)) {
-                                      const g = window.heic2any || window.__heic2anyFn;
-                                      const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
-                                      if (fn) { window.__heic2anyFn = fn; resolve(fn); return; }
-                                    }
-
-                                    // dynamically inject script
-                                    await new Promise((res, rej) => {
-                                      const s = document.createElement("script");
-                                      s.src = src;
-                                      s.async = true;
-                                      s.onload = () => res();
-                                      s.onerror = () => rej(new Error("failed to load " + src));
-                                      document.head.appendChild(s);
-                                    });
-
-                                    // check for exported function
-                                    const g = window.heic2any;
-                                    const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
-                                    if (fn) {
-                                      window.__heic2anyFn = fn;
-                                      resolve(fn);
-                                      return;
-                                    }
-                                    // otherwise continue to next source
-                                  } catch (err) {
-                                    console.warn("heic2any load failed for", src, err && err.message ? err.message : err);
-                                    // try next source
-                                  }
-                                }
-
-                                // none succeeded
-                                delete window.__heic2anyLoading;
-                                reject(new Error("Nenhuma fonte heic2any disponível (CDN/local falharam)"));
-                              });
-
-                              return window.__heic2anyLoading;
-                            }
-
-// ---------- converter diretamente um File HEIC -> JPEG dataURL ----------
-async function convertHeicFileToJpegDataUrl(file, options = { quality: 0.9 }) {
-  // returns dataURL string (image/jpeg) or "" on failure
-  try {
-    if (!file) return "";
-    // if it's not HEIC just return normal dataURL
-    const name = (file.name || "").toLowerCase();
-    const isHeic = (file.type && file.type.toLowerCase().includes("heic")) || name.endsWith(".heic") || name.endsWith(".heif");
-    if (!isHeic) {
-      // fallback: read file to dataURL
-      return await blobToDataURL(file);
-    }
-
-    // ensure converter
-    const heic = await ensureHeic2any();
-    if (!heic) throw new Error("heic2any indisponível");
-
-    // convert to jpeg blob
-    const converted = await heic({ blob: file, toType: "image/jpeg", quality: options.quality || 0.9 });
-    const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) ? converted[0] : converted);
-    if (!jpegBlob) throw new Error("heic2any retornou vazio");
-
-    // return dataURL
-    const dataUrl = await blobToDataURL(jpegBlob);
-    return dataUrl;
-  } catch (err) {
-    console.warn("convertHeicFileToJpegDataUrl falhou:", err && err.message ? err.message : err);
-    return "";
-  }
-}
-
-// ---------- Atualize fileToCompressedDataUrl para usar convertHeicFileToJpegDataUrl quando for HEIC ----------
-async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, quality = 0.6) {
-  return new Promise(async (resolve, reject) => {
-    const processDataUrl = async (dataUrl) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          let { width, height } = img;
-          const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
-          const targetWidth = Math.round(width * ratio);
-          const targetHeight = Math.round(height * ratio);
-          const canvas = document.createElement("canvas");
-          canvas.width = targetWidth;
-          canvas.height = targetHeight;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-          const out = canvas.toDataURL("image/jpeg", quality);
-          resolve(out);
-        } catch (errCanvas) {
-          console.warn("Erro ao desenhar no canvas:", errCanvas);
-          resolve(dataUrl); // fallback para original
-        }
-      };
-      img.onerror = (e) => {
-        reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
-      };
-      img.crossOrigin = "anonymous";
-      img.src = dataUrl;
-    };
-
+  // ---------- converter diretamente um File HEIC -> JPEG dataURL ----------
+  async function convertHeicFileToJpegDataUrl(file, options = { quality: 0.9 }) {
+    // returns dataURL string (image/jpeg) or "" on failure
     try {
-      // If HEIC file, try to convert first to dataURL jpeg
-      if (isHeicFile(file)) {
-        const convertedDataUrl = await convertHeicFileToJpegDataUrl(file, { quality: 0.9 });
-        if (!convertedDataUrl) {
-          // conversion failed — return empty so caller uses fallback
-          return resolve("");
-        }
-        // then resize the converted dataURL
-        return processDataUrl(convertedDataUrl);
+      if (!file) return "";
+      // if it's not HEIC just return normal dataURL
+      const name = (file.name || "").toLowerCase();
+      const isHeic =
+        (file.type && file.type.toLowerCase().includes("heic")) ||
+        name.endsWith(".heic") ||
+        name.endsWith(".heif");
+      if (!isHeic) {
+        // fallback: read file to dataURL
+        return await blobToDataURL(file);
       }
 
-      // not HEIC — just read and resize
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error);
-      reader.onload = () => processDataUrl(reader.result);
-      reader.readAsDataURL(file);
+      // ensure converter
+      const heic = await ensureHeic2any();
+      if (!heic) throw new Error("heic2any indisponível");
+
+      // convert to jpeg blob
+      const converted = await heic({
+        blob: file,
+        toType: "image/jpeg",
+        quality: options.quality || 0.9,
+      });
+      const jpegBlob =
+        converted instanceof Blob
+          ? converted
+          : Array.isArray(converted)
+          ? converted[0]
+          : converted;
+      if (!jpegBlob) throw new Error("heic2any retornou vazio");
+
+      // return dataURL
+      const dataUrl = await blobToDataURL(jpegBlob);
+      return dataUrl;
     } catch (err) {
-      reject(err);
+      console.warn(
+        "convertHeicFileToJpegDataUrl falhou:",
+        err && err.message ? err.message : err
+      );
+      return "";
     }
-  });
-}
+  }
+
+  // ---------- Atualize fileToCompressedDataUrl para usar convertHeicFileToJpegDataUrl quando for HEIC ----------
+  async function fileToCompressedDataUrl(
+    file,
+    maxWidth = 1280,
+    maxHeight = 720,
+    quality = 0.6
+  ) {
+    return new Promise(async (resolve, reject) => {
+      const processDataUrl = async (dataUrl) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            let { width, height } = img;
+            const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+            const targetWidth = Math.round(width * ratio);
+            const targetHeight = Math.round(height * ratio);
+            const canvas = document.createElement("canvas");
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+            const out = canvas.toDataURL("image/jpeg", quality);
+            resolve(out);
+          } catch (errCanvas) {
+            console.warn("Erro ao desenhar no canvas:", errCanvas);
+            resolve(dataUrl); // fallback para original
+          }
+        };
+        img.onerror = (e) => {
+          reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
+        };
+        img.crossOrigin = "anonymous";
+        img.src = dataUrl;
+      };
+
+      try {
+        // If HEIC file, try to convert first to dataURL jpeg
+        if (isHeicFile(file)) {
+          const convertedDataUrl = await convertHeicFileToJpegDataUrl(file, {
+            quality: 0.9,
+          });
+          if (!convertedDataUrl) {
+            // conversion failed — return empty so caller uses fallback
+            return resolve("");
+          }
+          // then resize the converted dataURL
+          return processDataUrl(convertedDataUrl);
+        }
+
+        // not HEIC — just read and resize
+        const reader = new FileReader();
+        reader.onerror = () => reject(reader.error);
+        reader.onload = () => processDataUrl(reader.result);
+        reader.readAsDataURL(file);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
 
   // tentar pré-carregar não bloqueante (melhora chance de conversão)
-  ensureHeic2any().catch((e) => { console.warn("heic2any pré-load falhou:", e && e.message ? e.message : e); });
+  ensureHeic2any().catch((e) => {
+    console.warn(
+      "heic2any pré-load falhou:",
+      e && e.message ? e.message : e
+    );
+  });
 
   // ========= Utilitários para conversão de dataURLs/blobs =========
 
@@ -319,7 +285,11 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
     if (!src || typeof src !== "string") return false;
     const s = src.toLowerCase();
     if (s.startsWith("data:")) {
-      return s.startsWith("data:image/heic") || s.startsWith("data:image/heif") || s.includes("heic");
+      return (
+        s.startsWith("data:image/heic") ||
+        s.startsWith("data:image/heif") ||
+        s.includes("heic")
+      );
     }
     // also check if the url ends with .heic/.heif
     return s.endsWith(".heic") || s.endsWith(".heif");
@@ -359,7 +329,8 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
           reject(err);
         }
       };
-      img.onerror = (e) => reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
+      img.onerror = (e) =>
+        reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
       img.crossOrigin = "anonymous";
       img.src = dataUrl;
     });
@@ -382,7 +353,12 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
     let quality = startQuality;
     while (quality >= minQuality) {
       try {
-        const shrunk = await resizeDataUrl(dataUrl, maxWidth, maxHeight, quality);
+        const shrunk = await resizeDataUrl(
+          dataUrl,
+          maxWidth,
+          maxHeight,
+          quality
+        );
         if (dataUrlByteSize(shrunk) <= maxBytes) return shrunk;
         dataUrl = shrunk;
       } catch (err) {
@@ -397,13 +373,26 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
     while (loops < 12) {
       currentMaxW = Math.max(100, Math.round(currentMaxW * downscaleStep));
       currentMaxH = Math.max(100, Math.round(currentMaxH * downscaleStep));
-      quality = Math.max(minQuality, startQuality * Math.pow(downscaleStep, loops));
+      quality = Math.max(
+        minQuality,
+        startQuality * Math.pow(downscaleStep, loops)
+      );
       try {
-        const shrunk = await resizeDataUrl(dataUrl, currentMaxW, currentMaxH, quality);
+        const shrunk = await resizeDataUrl(
+          dataUrl,
+          currentMaxW,
+          currentMaxH,
+          quality
+        );
         if (dataUrlByteSize(shrunk) <= maxBytes) return shrunk;
         dataUrl = shrunk;
       } catch (err) {
-        console.warn("Erro ao reduzir dimensões:", currentMaxW, currentMaxH, err);
+        console.warn(
+          "Erro ao reduzir dimensões:",
+          currentMaxW,
+          currentMaxH,
+          err
+        );
       }
       loops++;
     }
@@ -424,13 +413,18 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       maxWidth: 1200,
       maxHeight: 900,
       downscaleStep: 0.86,
-      finalAggressiveMaxBytes: 1048000 // segurança: abaixo do limite de 1_048_576
+      finalAggressiveMaxBytes: 1048000, // segurança: abaixo do limite de 1_048_576
     };
     const cfg = Object.assign({}, defaultOpts, opts);
 
     try {
       // 1) tenta compressão/resize "normal"
-      const start = await fileToCompressedDataUrl(file, cfg.startMaxWidth, cfg.startMaxHeight, cfg.startQuality);
+      const start = await fileToCompressedDataUrl(
+        file,
+        cfg.startMaxWidth,
+        cfg.startMaxHeight,
+        cfg.startQuality
+      );
 
       // 2) shrink iterativo até cfg.maxBytes
       let reduced = await shrinkDataUrlToLimit(start, {
@@ -446,19 +440,25 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       // 3) se ainda for muito grande, faz uma tentativa AGRESSIVA (mais downscale e menor qualidade)
       if (dataUrlByteSize(reduced) > cfg.finalAggressiveMaxBytes) {
         try {
-          // opção: reduzir para largura 800 e qualidade 0.48 -> re-encodar e testar
+          // opção: reduzir para largura 800 e qualidade 0.56 -> re-encodar e testar
           reduced = await resizeDataUrl(reduced, 800, 600, 0.56);
           if (dataUrlByteSize(reduced) > cfg.finalAggressiveMaxBytes) {
             reduced = await resizeDataUrl(reduced, 640, 480, 0.48);
           }
         } catch (errAgg) {
-          console.warn("Tentativa agressiva de reduzir image falhou:", errAgg);
+          console.warn(
+            "Tentativa agressiva de reduzir image falhou:",
+            errAgg
+          );
         }
       }
 
       return reduced;
     } catch (err) {
-      console.warn("fileToReducedDataUrlForFirestore falhou, fallback para leitura direta:", err);
+      console.warn(
+        "fileToReducedDataUrlForFirestore falhou, fallback para leitura direta:",
+        err
+      );
       try {
         // fallback simples: tentar ler direto como dataURL (pode ser grande)
         return await blobToDataURL(file);
@@ -475,7 +475,8 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       if (!src || typeof src !== "string") return src;
       // cache conversions
       window.__heicConvertedCache = window.__heicConvertedCache || {};
-      if (window.__heicConvertedCache[src]) return window.__heicConvertedCache[src];
+      if (window.__heicConvertedCache[src])
+        return window.__heicConvertedCache[src];
 
       // If it's a data URL with HEIC
       if (isDataUrlHeic(src)) {
@@ -483,8 +484,17 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
         try {
           const heic = await ensureHeic2any();
           const blob = dataURLtoBlob(src);
-          const converted = await heic({ blob, toType: "image/jpeg", quality: 0.9 });
-          const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) && converted.length ? converted[0] : converted);
+          const converted = await heic({
+            blob,
+            toType: "image/jpeg",
+            quality: 0.9,
+          });
+          const jpegBlob =
+            converted instanceof Blob
+              ? converted
+              : (Array.isArray(converted) && converted.length
+                  ? converted[0]
+                  : converted);
           if (!jpegBlob) throw new Error("heic2any retornou vazio");
           const jpg = await blobToDataURL(jpegBlob);
           window.__heicConvertedCache[src] = jpg;
@@ -496,14 +506,27 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       }
 
       // If it's a URL ending with .heic/.heif
-      if (typeof src === "string" && (src.toLowerCase().endsWith(".heic") || src.toLowerCase().endsWith(".heif"))) {
+      if (
+        typeof src === "string" &&
+        (src.toLowerCase().endsWith(".heic") ||
+          src.toLowerCase().endsWith(".heif"))
+      ) {
         try {
           const resp = await fetch(src);
           if (!resp.ok) throw new Error("fetch falhou: " + resp.status);
           const blob = await resp.blob();
           const heic = await ensureHeic2any();
-          const converted = await heic({ blob, toType: "image/jpeg", quality: 0.9 });
-          const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) && converted.length ? converted[0] : converted);
+          const converted = await heic({
+            blob,
+            toType: "image/jpeg",
+            quality: 0.9,
+          });
+          const jpegBlob =
+            converted instanceof Blob
+              ? converted
+              : (Array.isArray(converted) && converted.length
+                  ? converted[0]
+                  : converted);
           if (!jpegBlob) throw new Error("heic2any retornou vazio (remoto)");
           const jpg = await blobToDataURL(jpegBlob);
           window.__heicConvertedCache[src] = jpg;
@@ -524,7 +547,9 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
   // ========= RENUMERAR: ordena por data ASC (mais antigo = 1) =========
   async function renumerarEventosCodigoSequencial() {
     try {
-      console.log("Iniciando renumeração dos eventos (mais antigo = codigo 1)...");
+      console.log(
+        "Iniciando renumeração dos eventos (mais antigo = codigo 1)..."
+      );
 
       // Busca TODOS os eventos, do mais antigo para o mais recente (asc)
       const snap = await db
@@ -550,7 +575,10 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
         if (ops >= 450) {
           commits.push(
             batch.commit().catch((err) => {
-              console.error("Erro no commit parcial durante renumeração:", err);
+              console.error(
+                "Erro no commit parcial durante renumeração:",
+                err
+              );
             })
           );
           batch = db.batch();
@@ -561,7 +589,10 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       if (ops > 0) {
         commits.push(
           batch.commit().catch((err) => {
-            console.error("Erro no commit final durante renumeração:", err);
+            console.error(
+              "Erro no commit final durante renumeração:",
+              err
+            );
           })
         );
       }
@@ -586,19 +617,30 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       ]);
 
       if (mostRecentSnap.empty || oldestSnap.empty) {
-        console.log("Não há eventos suficientes para avaliar ordenação de códigos.");
+        console.log(
+          "Não há eventos suficientes para avaliar ordenação de códigos."
+        );
         return;
       }
 
       const mostRecentDoc = mostRecentSnap.docs[0];
       const oldestDoc = oldestSnap.docs[0];
-      const maxCodigoDoc = maxCodigoSnap.empty ? null : maxCodigoSnap.docs[0];
+      const maxCodigoDoc = maxCodigoSnap.empty
+        ? null
+        : maxCodigoSnap.docs[0];
 
       const mostRecentCodigo = mostRecentDoc.data().codigo;
       const oldestCodigo = oldestDoc.data().codigo;
       const maxCodigo = maxCodigoDoc ? maxCodigoDoc.data().codigo : null;
 
-      console.log("Detecção de códigos: mostRecentCodigo=", mostRecentCodigo, "oldestCodigo=", oldestCodigo, "maxCodigo=", maxCodigo);
+      console.log(
+        "Detecção de códigos: mostRecentCodigo=",
+        mostRecentCodigo,
+        "oldestCodigo=",
+        oldestCodigo,
+        "maxCodigo=",
+        maxCodigo
+      );
 
       const likelyInverted =
         typeof mostRecentCodigo === "number" &&
@@ -622,7 +664,10 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       }
 
       const total = await renumerarEventosCodigoSequencial();
-      alert("Renumeração automática concluída. Total de eventos renumerados: " + total);
+      alert(
+        "Renumeração automática concluída. Total de eventos renumerados: " +
+          total
+      );
     } catch (err) {
       console.error("Erro na detecção/correção de códigos:", err);
       alert("Erro ao verificar/renumerar códigos. Veja o console (F12).");
@@ -712,111 +757,6 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
       btnToggleTema.textContent = isDark ? "☀ Claro" : "🌙 Escuro";
     }
   })();
-
-  // ========= Helpers: compressão de imagem =========
-  function fileToCompressedDataUrl(
-    file,
-    maxWidth = 1280,
-    maxHeight = 720,
-    quality = 0.6
-  ) {
-    return new Promise((resolve, reject) => {
-      const processBlob = (blob) => {
-        const reader = new FileReader();
-
-        reader.onerror = () => reject(reader.error);
-        reader.onload = () => {
-          const img = new Image();
-
-          img.onload = () => {
-            try {
-              let { width, height } = img;
-              const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
-              const targetWidth = Math.round(width * ratio);
-              const targetHeight = Math.round(height * ratio);
-
-              const canvas = document.createElement("canvas");
-              canvas.width = targetWidth;
-              canvas.height = targetHeight;
-              const ctx = canvas.getContext("2d");
-              ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-
-              const dataUrl = canvas.toDataURL("image/jpeg", quality);
-              resolve(dataUrl);
-            } catch (errCanvas) {
-              console.warn("Erro ao desenhar no canvas:", errCanvas);
-              resolve(reader.result);
-            }
-          };
-
-          img.onerror = () => {
-            console.warn(
-              "Imagem não pôde ser carregada no <img> (possível HEIC sem suporte)."
-            );
-            resolve(reader.result);
-          };
-
-          img.src = reader.result;
-        };
-
-        reader.readAsDataURL(blob);
-      };
-
-      if (isHeicFile(file)) {
-        ensureHeic2any()
-          .then((fn) =>
-            fn({
-              blob: file,
-              toType: "image/jpeg",
-              quality: 0.9,
-            })
-          )
-          .then((convertedBlob) => {
-            const blob =
-              convertedBlob instanceof Blob
-                ? convertedBlob
-                : Array.isArray(convertedBlob) && convertedBlob.length
-                ? convertedBlob[0]
-                : convertedBlob;
-            if (!blob) {
-              throw new Error("heic2any retornou valor inválido");
-            }
-            processBlob(blob);
-          })
-          .catch(async (err) => {
-            console.error("Erro ao converter HEIC para JPG:", err);
-            try {
-              const fr = new FileReader();
-              fr.onload = () => {
-                console.warn(
-                  "FALLBACK: usando dataURL original do arquivo HEIC (pode não ser exibido em todos os navegadores)."
-                );
-                resolve(fr.result);
-              };
-              fr.onerror = () => {
-                reject(
-                  new Error(
-                    "Falha ao processar HEIC e fallback também falhou. Tente exportar a imagem para JPG/PNG."
-                  )
-                );
-              };
-              fr.readAsDataURL(file);
-            } catch (fallbackErr) {
-              reject(
-                new Error(
-                  "Falha ao converter HEIC e não foi possível aplicar fallback. " +
-                    fallbackErr.message
-                )
-              );
-            }
-          });
-
-        return;
-      }
-
-      processBlob(file);
-    });
-  }
 
   // ========= Drag & Drop de fotos =========
   if (dropArea && fotosInput) {
@@ -913,14 +853,18 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
 
     form.reset();
     if (campoEventoId) campoEventoId.value = "";
-    if (campoCodigo) { campoCodigo.value = ""; campoCodigo.readOnly = false; }
+    if (campoCodigo) {
+      campoCodigo.value = "";
+      campoCodigo.readOnly = false;
+    }
     eventoEmEdicaoId = null;
 
     if (novasFotosPreview) novasFotosPreview.innerHTML = "";
     if (fotosAtuaisDiv) fotosAtuaisDiv.innerHTML = "";
     if (fotosAtuaisWrapper) fotosAtuaisWrapper.classList.add("oculto");
 
-    if (formTituloModo) formTituloModo.textContent = "Cadastrar novo evento";
+    if (formTituloModo)
+      formTituloModo.textContent = "Cadastrar novo evento";
     if (btnSalvar) btnSalvar.textContent = "Salvar evento";
     if (btnCancelarEdicao) btnCancelarEdicao.classList.add("oculto");
   }
@@ -991,7 +935,10 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
         try {
           src = await convertDataUrlIfHeic(src);
         } catch (err) {
-          console.warn("Falha ao converter foto do evento (seguindo com original):", err);
+          console.warn(
+            "Falha ao converter foto do evento (seguindo com original):",
+            err
+          );
         }
 
         fotos.push({ src, legenda: legenda || "" });
@@ -1031,7 +978,10 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
         try {
           src = await convertDataUrlIfHeic(src);
         } catch (err) {
-          console.warn("Falha ao converter foto para exibição (usando original):", err);
+          console.warn(
+            "Falha ao converter foto para exibição (usando original):",
+            err
+          );
         }
 
         const card = document.createElement("div");
@@ -1176,15 +1126,15 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
           idEvento = docRef.id;
         }
 
-        // ======= BLOCO ATUALIZADO: Upload novas fotos em base64 (com conversão HEIC -> JPG e redução) =======
-        // Salva dataUrl reduzido e thumbnail no Firestore (subcollection eventos/{id}/fotos).
+        // ======= Upload novas fotos em base64 (com conversão HEIC -> JPG e redução) =======
         if (fotosInput && fotosInput.files && fotosInput.files.length) {
           for (let file of fotosInput.files) {
             if (!file.type.startsWith("image/") && !isHeicFile(file)) continue;
 
             try {
               // Gera dataURL reduzido (max ~350KB por padrão)
-              const reducedDataUrl = await fileToReducedDataUrlForFirestore(file);
+              const reducedDataUrl =
+                await fileToReducedDataUrlForFirestore(file);
 
               if (!reducedDataUrl) {
                 console.warn("Imagem reduzida vazia, pulando:", file.name);
@@ -1194,9 +1144,17 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
               // Cria thumbnail menor para preview (opcional)
               let thumbnail = reducedDataUrl;
               try {
-                thumbnail = await resizeDataUrl(reducedDataUrl, 420, 320, 0.65);
+                thumbnail = await resizeDataUrl(
+                  reducedDataUrl,
+                  420,
+                  320,
+                  0.65
+                );
               } catch (thumbErr) {
-                console.warn("Falha ao criar thumbnail (usando reduzido):", thumbErr);
+                console.warn(
+                  "Falha ao criar thumbnail (usando reduzido):",
+                  thumbErr
+                );
                 thumbnail = reducedDataUrl;
               }
 
@@ -1213,10 +1171,16 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
                     firebase.firestore.FieldValue.serverTimestamp(),
                 });
 
-              console.log("Foto salva (reduzida) no Firestore:", file.name);
+              console.log(
+                "Foto salva (reduzida) no Firestore:",
+                file.name
+              );
             } catch (errImg) {
-              console.error("Erro ao processar/salvar imagem:", file.name, errImg);
-              // notifica usuário, mas continua com as próximas imagens
+              console.error(
+                "Erro ao processar/salvar imagem:",
+                file.name,
+                errImg
+              );
               alert(
                 "Erro ao processar a imagem '" +
                   file.name +
@@ -1250,7 +1214,7 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
     });
   }
 
-  // Substitua apenas a função carregarEventos() existente por esta versão
+  // ========= carregarEventos() =========
   async function carregarEventos() {
     if (!tabelaBody) return;
 
@@ -1258,7 +1222,9 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
     eventosCache = [];
 
     try {
-      const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
+      const orderParam = (
+        new URLSearchParams(location.search).get("order") || ""
+      ).toLowerCase();
       const order = orderParam === "asc" ? "asc" : "desc";
 
       let queryRef = db.collection("eventos");
@@ -1302,56 +1268,88 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
 
       try {
         const snap = await queryRef.get();
-        snap.forEach((doc) => eventosCache.push({ id: doc.id, ...doc.data() }));
+        snap.forEach((doc) =>
+          eventosCache.push({ id: doc.id, ...doc.data() })
+        );
         renderTabela();
         return;
       } catch (serverErr) {
         console.warn("Firestore query failed:", serverErr);
-        // detecta se é erro que pede índice composto
-        const msg = (serverErr && serverErr.message) ? serverErr.message : "";
+        const msg =
+          serverErr && serverErr.message ? serverErr.message : "";
         const indexUrlMatch = msg.match(/https?:\/\/[^\s)]+/);
         const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
 
         if (msg.includes("requires an index") || indexUrl) {
-          // informa o usuário e oferece abrir o link
-          const openLink = confirm("A consulta que você tentou executar exige um índice composto no Firestore. Deseja abrir a página para criar o índice agora?\n\n(Se não criar, o filtro será feito localmente, possivelmente lento)");
+          const openLink = confirm(
+            "A consulta que você tentou executar exige um índice composto no Firestore. Deseja abrir a página para criar o índice agora?\n\n(Se não criar, o filtro será feito localmente, possivelmente lento)"
+          );
           if (openLink && indexUrl) {
             window.open(indexUrl, "_blank");
           } else if (!indexUrl) {
-            alert("Firestore solicitou um índice, verifique o console para o link ou acesse Firestore Console → Indexes.");
+            alert(
+              "Firestore solicitou um índice, verifique o console para o link ou acesse Firestore Console → Indexes."
+            );
           }
         } else {
-          // qualquer outro erro
           console.error("Erro no get() do Firestore:", serverErr);
           alert("Erro ao consultar Firestore. Veja o console (F12).");
         }
 
         // Fallback client-side (busca um lote e filtra localmente)
         const FETCH_LIMIT = 800;
-        const snapAll = await db.collection("eventos").orderBy("dataInicio", "desc").limit(FETCH_LIMIT).get();
-        const docs = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
+        const snapAll = await db
+          .collection("eventos")
+          .orderBy("dataInicio", "desc")
+          .limit(FETCH_LIMIT)
+          .get();
+        const docs = snapAll.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        }));
 
         let filtered = docs;
         if (fieldRaw && valRaw) {
           const v = valRaw.toString().trim().toLowerCase();
           if (fieldRaw === "id") {
-            filtered = filtered.filter(d => d.id === valRaw);
+            filtered = filtered.filter((d) => d.id === valRaw);
             if (!filtered.length) {
               const n = Number(valRaw);
-              if (!Number.isNaN(n)) filtered = docs.filter(d => d.codigo === n);
-              else filtered = docs.filter(d => (d.evento || "").toString().toLowerCase() === v);
+              if (!Number.isNaN(n))
+                filtered = docs.filter((d) => d.codigo === n);
+              else
+                filtered = docs.filter(
+                  (d) =>
+                    (d.evento || "")
+                      .toString()
+                      .toLowerCase() === v
+                );
             }
           } else if (fieldRaw === "codigo") {
             const n = Number(valRaw);
-            if (!Number.isNaN(n)) filtered = filtered.filter(d => d.codigo === n);
-            else filtered = filtered.filter(d => (d.codigo || "").toString() === valRaw);
+            if (!Number.isNaN(n))
+              filtered = filtered.filter((d) => d.codigo === n);
+            else
+              filtered = filtered.filter(
+                (d) =>
+                  (d.codigo || "").toString() === valRaw
+              );
           } else {
-            filtered = filtered.filter(d => ((d[fieldRaw] || "").toString().toLowerCase() === v));
+            filtered = filtered.filter(
+              (d) =>
+                ((d[fieldRaw] || "").toString().toLowerCase() === v)
+            );
           }
         }
 
-        if (de) filtered = filtered.filter(d => d.dataInicio && d.dataInicio >= de);
-        if (ate) filtered = filtered.filter(d => d.dataInicio && d.dataInicio <= ate);
+        if (de)
+          filtered = filtered.filter(
+            (d) => d.dataInicio && d.dataInicio >= de
+          );
+        if (ate)
+          filtered = filtered.filter(
+            (d) => d.dataInicio && d.dataInicio <= ate
+          );
 
         filtered.sort((a, b) => {
           const da = a.dataInicio || "";
@@ -1462,11 +1460,12 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
   }
 
   if (btnAplicarIs) btnAplicarIs.addEventListener("click", carregarEventos);
-  if (btnLimparIs) btnLimparIs.addEventListener("click", () => {
-    if (filterField) filterField.value = "";
-    if (filterValue) filterValue.value = "";
-    carregarEventos();
-  });
+  if (btnLimparIs)
+    btnLimparIs.addEventListener("click", () => {
+      if (filterField) filterField.value = "";
+      if (filterValue) filterValue.value = "";
+      carregarEventos();
+    });
 
   // ========= Funções para PDFs (com suporte a imagens convertidas) =========
 
@@ -1502,7 +1501,10 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
         doc.addImage(logoSebraeImg, "PNG", 180, 3, 18, 14);
       }
     } catch (e) {
-      console.warn("Não foi possível adicionar alguma logo no cabeçalho do PDF:", e);
+      console.warn(
+        "Não foi possível adicionar alguma logo no cabeçalho do PDF:",
+        e
+      );
     }
 
     doc.setTextColor(255, 255, 255);
@@ -1511,7 +1513,11 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
     doc.text("INSTITUTO FEDERAL DO PARANÁ - CAMPUS PALMAS", 60, 7);
 
     doc.setFontSize(9);
-    doc.text("Incubadora IFPR / Prefeitura Municipal de Palmas / Sebrae-PR", 60, 12);
+    doc.text(
+      "Incubadora IFPR / Prefeitura Municipal de Palmas / Sebrae-PR",
+      60,
+      12
+    );
 
     doc.setFontSize(9);
     doc.text(titulo, 60, 17);
@@ -1528,6 +1534,9 @@ async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, q
   }
 
   // (geração de PDFs usa getFotosEvento que faz conversão quando necessário)
+  // Aqui assumo que você já tem implementarções de:
+  // - gerarPdfEventoComFotos(idEvento)
+  // - e possivelmente PDFs completos/simples usando jsPDF + getFotosEvento
 
   // ========= Inicialização =========
   // Primeiro: detectar se os códigos no banco parecem invertidos e oferecer correção.
