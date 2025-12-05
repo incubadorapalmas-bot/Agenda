@@ -1076,6 +1076,73 @@ document.addEventListener("DOMContentLoaded", async () => {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
 
+      // ======= Upload novas fotos em base64 (com conversão HEIC -> JPG e redução) =======
+if (fotosInput && fotosInput.files && fotosInput.files.length) {
+  for (let file of fotosInput.files) {
+    if (!file.type.startsWith("image/") && !isHeicFile(file)) continue;
+
+    try {
+      // Gera dataURL reduzido (max ~350KB por padrão)
+      const reducedDataUrl =
+        await fileToReducedDataUrlForFirestore(file);
+
+      if (!reducedDataUrl) {
+        console.warn("Imagem reduzida vazia, pulando:", file.name);
+        continue;
+      }
+
+      // Cria thumbnail menor para preview (opcional)
+      let thumbnail = reducedDataUrl;
+      try {
+        thumbnail = await resizeDataUrl(
+          reducedDataUrl,
+          420,
+          320,
+          0.65
+        );
+      } catch (thumbErr) {
+        console.warn(
+          "Falha ao criar thumbnail (usando reduzido):",
+          thumbErr
+        );
+        thumbnail = reducedDataUrl;
+      }
+
+      // Salva APENAS os dataURLs reduzidos (evita salvar original HEIC grande)
+      await db
+        .collection("eventos")
+        .doc(idEvento)
+        .collection("fotos")
+        .add({
+          dataUrl: reducedDataUrl,
+          thumbnail,
+          legenda: file.name,
+          criadaEm:
+            firebase.firestore.FieldValue.serverTimestamp(),
+        });
+
+      console.log(
+        "Foto salva (reduzida) no Firestore:",
+        file.name
+      );
+    } catch (errImg) {
+      console.error(
+        "Erro ao processar/salvar imagem:",
+        file.name,
+        errImg
+      );
+      alert(
+        "Erro ao processar a imagem '" +
+          file.name +
+          "'. Se for HEIC, tente exportar para JPG/PNG no celular ou computador."
+      );
+    }
+  }
+}
+// ======= FIM BLOCO ATUALIZADO =======
+
+
+
       const campoEvento = document.getElementById("evento");
       if (!campoEvento || !campoEvento.value.trim()) {
         alert("Informe o tipo de evento.");
