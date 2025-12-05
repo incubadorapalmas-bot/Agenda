@@ -38,18 +38,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
  // Substitua o bloco que define HEIC2ANY_SRC e a função ensureHeic2any por este:
 
+// ---------- heic2any loader (tenta CDN então local) ----------
 const HEIC2ANY_SOURCES = [
-  "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js", // CDN (rápido quando disponível)
-  "/vendor/heic2any.min.js" // cópia local no repositório (garante funcionamento offline/CSP)
+  "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js",
+  "/vendor/heic2any.min.js"
 ];
 
 function ensureHeic2any() {
-  // retorna Promise que resolve com a função heic2any
   if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
     return Promise.resolve(window.__heic2anyFn);
   }
 
-  // se a lib já foi exposta globalmente por um <script src="/vendor/..."> no HTML
   if (window.heic2any) {
     const g = window.heic2any;
     const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
@@ -59,34 +58,29 @@ function ensureHeic2any() {
     }
   }
 
-  // se já está carregando, devolve a mesma promise
   if (window.__heic2anyLoading) return window.__heic2anyLoading;
 
-  // tenta carregar as fontes em sequência
   window.__heic2anyLoading = new Promise(async (resolve, reject) => {
     for (const src of HEIC2ANY_SOURCES) {
       try {
-        // se é a fonte local e já existe no DOM, espera apenas que esteja disponível
-        if (src.startsWith("/")) {
-          // se já está global (carregado via <script>), pega
-          if (window.heic2any || window.__heic2anyFn) {
-            const g = window.heic2any || window.__heic2anyFn;
-            const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
-            if (fn) { window.__heic2anyFn = fn; resolve(fn); return; }
-          }
+        // if already global (via <script src="/vendor/...">) pick it
+        if (src.startsWith("/") && (window.heic2any || window.__heic2anyFn)) {
+          const g = window.heic2any || window.__heic2anyFn;
+          const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
+          if (fn) { window.__heic2anyFn = fn; resolve(fn); return; }
         }
 
-        // cria script dinamicamente
+        // dynamically inject script
         await new Promise((res, rej) => {
           const s = document.createElement("script");
           s.src = src;
           s.async = true;
           s.onload = () => res();
-          s.onerror = () => rej(new Error("Falha ao carregar " + src));
+          s.onerror = () => rej(new Error("failed to load " + src));
           document.head.appendChild(s);
         });
 
-        // após carregar, tenta extrair função
+        // check for exported function
         const g = window.heic2any;
         const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default) || (g && g.heic2any);
         if (fn) {
@@ -94,19 +88,103 @@ function ensureHeic2any() {
           resolve(fn);
           return;
         }
-        // se carregou mas não expôs, continua para próxima fonte
+        // otherwise continue to next source
       } catch (err) {
-        console.warn("Falha ao carregar heic2any de", src, ":", err && err.message ? err.message : err);
-        // tenta próxima fonte
+        console.warn("heic2any load failed for", src, err && err.message ? err.message : err);
+        // try next source
       }
     }
 
-    // se chegou aqui, nenhuma fonte funcionou
+    // none succeeded
     delete window.__heic2anyLoading;
-    reject(new Error("Nenhuma fonte heic2any disponível (CDN e local falharam)"));
+    reject(new Error("Nenhuma fonte heic2any disponível (CDN/local falharam)"));
   });
 
   return window.__heic2anyLoading;
+}
+
+// ---------- converter diretamente um File HEIC -> JPEG dataURL ----------
+async function convertHeicFileToJpegDataUrl(file, options = { quality: 0.9 }) {
+  // returns dataURL string (image/jpeg) or "" on failure
+  try {
+    if (!file) return "";
+    // if it's not HEIC just return normal dataURL
+    const name = (file.name || "").toLowerCase();
+    const isHeic = (file.type && file.type.toLowerCase().includes("heic")) || name.endsWith(".heic") || name.endsWith(".heif");
+    if (!isHeic) {
+      // fallback: read file to dataURL
+      return await blobToDataURL(file);
+    }
+
+    // ensure converter
+    const heic = await ensureHeic2any();
+    if (!heic) throw new Error("heic2any indisponível");
+
+    // convert to jpeg blob
+    const converted = await heic({ blob: file, toType: "image/jpeg", quality: options.quality || 0.9 });
+    const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) ? converted[0] : converted);
+    if (!jpegBlob) throw new Error("heic2any retornou vazio");
+
+    // return dataURL
+    const dataUrl = await blobToDataURL(jpegBlob);
+    return dataUrl;
+  } catch (err) {
+    console.warn("convertHeicFileToJpegDataUrl falhou:", err && err.message ? err.message : err);
+    return "";
+  }
+}
+
+// ---------- Atualize fileToCompressedDataUrl para usar convertHeicFileToJpegDataUrl quando for HEIC ----------
+async function fileToCompressedDataUrl(file, maxWidth = 1280, maxHeight = 720, quality = 0.6) {
+  return new Promise(async (resolve, reject) => {
+    const processDataUrl = async (dataUrl) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          const ratio = Math.min(maxWidth / width, maxHeight / height, 1);
+          const targetWidth = Math.round(width * ratio);
+          const targetHeight = Math.round(height * ratio);
+          const canvas = document.createElement("canvas");
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+          const out = canvas.toDataURL("image/jpeg", quality);
+          resolve(out);
+        } catch (errCanvas) {
+          console.warn("Erro ao desenhar no canvas:", errCanvas);
+          resolve(dataUrl); // fallback para original
+        }
+      };
+      img.onerror = (e) => {
+        reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
+      };
+      img.crossOrigin = "anonymous";
+      img.src = dataUrl;
+    };
+
+    try {
+      // If HEIC file, try to convert first to dataURL jpeg
+      if (isHeicFile(file)) {
+        const convertedDataUrl = await convertHeicFileToJpegDataUrl(file, { quality: 0.9 });
+        if (!convertedDataUrl) {
+          // conversion failed — return empty so caller uses fallback
+          return resolve("");
+        }
+        // then resize the converted dataURL
+        return processDataUrl(convertedDataUrl);
+      }
+
+      // not HEIC — just read and resize
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => processDataUrl(reader.result);
+      reader.readAsDataURL(file);
+    } catch (err) {
+      reject(err);
+    }
+  });
 }
 
   // tentar pré-carregar não bloqueante (melhora chance de conversão)
