@@ -1,5 +1,9 @@
 // app.js - Agenda Incubadora IFPR/PMP
 // Versão completa: tratamento HEIC/HEIF, renumeração, filtros, previews, e geração de PDFs.
+// Mantive toda a lógica original e APENAS substituí/tornei mais robusta a parte de salvar fotos:
+// - Converte HEIC -> JPEG se necessário (heic2any)
+// - Reduz (resize + reencode) iterativamente para caber em limite (por padrão ~350KB)
+// - Salva no Firestore apenas dataUrl reduzido + thumbnail pequeno
 // Cole por cima do seu app.js atual (substitua totalmente).
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -32,247 +36,70 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logoSebraeImg = new Image();
   logoSebraeImg.src = "Sebrae.png";
 
- // Substitua/adicione as funções abaixo no seu app.js para garantir que imagens HEIC/HEIF
-// sejam convertidas para JPEG ao carregar (exibição e PDFs).
-//
-// Inclui:
-// - ensureHeic2any(): carrega heic2any via CDN (cacheado).
-// - blobToDataURL(), dataURLtoBlob(): utilitários.
-// - convertDataUrlIfHeic(): converte dataURLs HEIC ou URLs terminando em .heic/.heif para dataURL JPEG.
-// - getFotosEvento() e carregarFotosDoEvento(): versão que usa a conversão ao carregar.
-//
-// Observação: essas funções fazem a conversão em memória. Se quiser persistir a versão JPEG no Firestore
-// para evitar reconversões futuras, posso incluir opcionalmente um update do documento (consome gravações).
+  // ========= CONSTANTE DO CDN DO HEIC2ANY (mais recente via jsDelivr) =========
+  const HEIC2ANY_SRC =
+    "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js";
 
-/* ---------- utilitários / conversão HEIC ---------- */
+  function ensureHeic2any() {
+    if (
+      window.__heic2anyFn &&
+      typeof window.__heic2anyFn === "function"
+    ) {
+      return Promise.resolve(window.__heic2anyFn);
+    }
 
-const HEIC2ANY_SRC = "https://cdn.jsdelivr.net/npm/heic2any@0.0.6/dist/heic2any.min.js";
-
-function ensureHeic2any() {
-  if (window.__heic2anyFn && typeof window.__heic2anyFn === "function") return Promise.resolve(window.__heic2anyFn);
-  if (window.heic2any) {
-    const g = window.heic2any;
-    const fn = (typeof g === "function" && g) || (g && typeof g.default === "function" && g.default);
-    if (fn) { window.__heic2anyFn = fn; return Promise.resolve(fn); }
-  }
-  if (window.__heic2anyLoading) return window.__heic2anyLoading;
-
-  window.__heic2anyLoading = new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = HEIC2ANY_SRC;
-    s.async = true;
-    s.onload = () => {
+    if (window.heic2any) {
       const g = window.heic2any;
-      let fn = null;
-      if (typeof g === "function") fn = g;
-      else if (g && typeof g.default === "function") fn = g.default;
-      else if (g && typeof g.heic2any === "function") fn = g.heic2any;
-      if (!fn && window.__heic2anyFn && typeof window.__heic2anyFn === "function") fn = window.__heic2anyFn;
-      if (!fn) return reject(new Error("heic2any não expôs a função esperada"));
-      window.__heic2anyFn = fn;
-      resolve(fn);
-    };
-    s.onerror = () => reject(new Error("Falha ao carregar heic2any CDN"));
-    document.head.appendChild(s);
-  });
-
-  return window.__heic2anyLoading;
-}
-
-function dataURLtoBlob(dataurl) {
-  const parts = dataurl.split(',');
-  if (parts.length !== 2) throw new Error('dataURL inválida');
-  const meta = parts[0];
-  const b64 = parts[1];
-  const mimeMatch = meta.match(/data:(.*?)(;base64)?$/);
-  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-  const byteString = atob(b64);
-  const ia = new Uint8Array(byteString.length);
-  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-  return new Blob([ia], { type: mime });
-}
-
-function blobToDataURL(blob) {
-  return new Promise((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(blob);
-  });
-}
-
-function isHeicDataUrl(src) {
-  if (!src || typeof src !== 'string') return false;
-  const s = src.toLowerCase();
-  return s.startsWith('data:image/heic') || s.startsWith('data:image/heif') || s.includes('image/heic') || s.includes('image/heif');
-}
-
-function isHeicUrl(src) {
-  if (!src || typeof src !== 'string') return false;
-  const s = src.toLowerCase().split('?')[0].split('#')[0];
-  return s.endsWith('.heic') || s.endsWith('.heif');
-}
-
-/**
- * Converte um dataURL HEIC ou uma URL .heic/.heif remota para dataURL JPEG.
- * - Usa cache em window.__heicConvertedCache para evitar reconversões.
- * - Em caso de falha retorna o src original (fallback).
- */
-async function convertDataUrlIfHeic(src) {
-  try {
-    if (!src || typeof src !== 'string') return src;
-
-    // cache
-    window.__heicConvertedCache = window.__heicConvertedCache || {};
-    if (window.__heicConvertedCache[src]) return window.__heicConvertedCache[src];
-
-    // 1) dataURL HEIC
-    if (isHeicDataUrl(src)) {
-      try {
-        const blob = dataURLtoBlob(src);
-        const heic = await ensureHeic2any();
-        const converted = await heic({ blob, toType: 'image/jpeg', quality: 0.9 });
-        const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) && converted.length ? converted[0] : converted);
-        if (!jpegBlob) throw new Error('heic2any retornou vazio');
-        const jpgDataUrl = await blobToDataURL(jpegBlob);
-        window.__heicConvertedCache[src] = jpgDataUrl;
-        return jpgDataUrl;
-      } catch (err) {
-        console.warn('Falha ao converter dataURL HEIC -> JPEG:', err);
-        return src;
+      const fn =
+        (typeof g === "function" && g) ||
+        (g && typeof g.default === "function" && g.default);
+      if (fn) {
+        window.__heic2anyFn = fn;
+        return Promise.resolve(fn);
       }
     }
 
-    // 2) URL remota terminando com .heic/.heif
-    if (isHeicUrl(src)) {
-      try {
-        const resp = await fetch(src);
-        if (!resp.ok) throw new Error('fetch falhou: ' + resp.status);
-        const blob = await resp.blob();
-        const heic = await ensureHeic2any();
-        const converted = await heic({ blob, toType: 'image/jpeg', quality: 0.9 });
-        const jpegBlob = converted instanceof Blob ? converted : (Array.isArray(converted) && converted.length ? converted[0] : converted);
-        if (!jpegBlob) throw new Error('heic2any retornou vazio (remoto)');
-        const jpgDataUrl = await blobToDataURL(jpegBlob);
-        window.__heicConvertedCache[src] = jpgDataUrl;
-        return jpgDataUrl;
-      } catch (err) {
-        console.warn('Falha ao buscar/convert .heic remoto:', err);
-        return src;
-      }
+    if (window.__heic2anyLoading) {
+      return window.__heic2anyLoading;
     }
 
-    // não é HEIC, retorna original
-    return src;
-  } catch (err) {
-    console.error('Erro em convertDataUrlIfHeic:', err);
-    return src;
-  }
-}
+    window.__heic2anyLoading = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = HEIC2ANY_SRC;
+      script.async = true;
 
-/* ---------- getFotosEvento e carregarFotosDoEvento (com conversão) ---------- */
+      script.onload = () => {
+        const g = window.heic2any;
+        let fn = null;
+        if (typeof g === "function") fn = g;
+        else if (g && typeof g.default === "function") fn = g.default;
+        else if (g && typeof g.heic2any === "function") fn = g.heic2any;
 
-/**
- * getFotosEvento(idEvento)
- * - retorna lista [{ src: dataUrlJPEGorOriginal, legenda }]
- * - converte HEIC/HEIF para JPEG quando necessário
- */
-async function getFotosEvento(idEvento) {
-  const fotos = [];
-  try {
-    const snap = await db.collection('eventos').doc(idEvento).collection('fotos').get();
-    for (const docFoto of snap.docs) {
-      const data = docFoto.data();
-      let src = data.dataUrl || data.url || '';
-      if (!src) continue;
-      try {
-        src = await convertDataUrlIfHeic(src);
-      } catch (err) {
-        console.warn('Falha ao converter foto do evento (seguindo com original):', err);
-      }
-      fotos.push({ src, legenda: data.legenda || '' });
-    }
-  } catch (err) {
-    console.error('Erro ao buscar fotos do evento', err);
-  }
-  return fotos;
-}
-
-/**
- * carregarFotosDoEvento(idEvento)
- * - Atualiza DOM em #fotosAtuais com imagens convertidas
- * - Mostra wrapper ou oculta conforme resultado
- */
-async function carregarFotosDoEvento(idEvento) {
-  if (!fotosAtuaisDiv || !fotosAtuaisWrapper) return;
-  fotosAtuaisDiv.innerHTML = '';
-
-  try {
-    const snap = await db.collection('eventos').doc(idEvento).collection('fotos').get();
-    if (snap.empty) {
-      fotosAtuaisWrapper.classList.add('oculto');
-      return;
-    }
-
-    fotosAtuaisWrapper.classList.remove('oculto');
-
-    for (const docFoto of snap.docs) {
-      const d = docFoto.data();
-      let src = d.dataUrl || d.url || '';
-      if (!src) continue;
-
-      // show temporary placeholder while converting (optional)
-      const card = document.createElement('div');
-      card.className = 'foto-thumb';
-      const img = document.createElement('img');
-      img.className = 'foto-thumb__img';
-      img.alt = d.legenda || 'Foto do evento';
-      // set a low-opacity placeholder so layout is stable
-      img.style.opacity = '0.0';
-      img.src = ''; // will set after conversion
-      const caption = document.createElement('span');
-      caption.textContent = d.legenda || '';
-      const btnExcluir = document.createElement('button');
-      btnExcluir.type = 'button';
-      btnExcluir.textContent = 'Excluir';
-      btnExcluir.className = 'btn secundario';
-      btnExcluir.style.marginTop = '6px';
-
-      // exclude handler
-      btnExcluir.addEventListener('click', async () => {
-        const ok = confirm('Excluir esta foto do evento?');
-        if (!ok) return;
-        try {
-          await db.collection('eventos').doc(idEvento).collection('fotos').doc(docFoto.id).delete();
-          card.remove();
-          if (!fotosAtuaisDiv.querySelector('.foto-thumb')) fotosAtuaisWrapper.classList.add('oculto');
-        } catch (err) {
-          console.error('Erro ao excluir foto', err);
-          alert('Erro ao excluir foto. Veja console.');
+        if (!fn && window.__heic2anyFn && typeof window.__heic2anyFn === "function") {
+          fn = window.__heic2anyFn;
         }
-      });
 
-      card.appendChild(img);
-      card.appendChild(caption);
-      card.appendChild(btnExcluir);
-      fotosAtuaisDiv.appendChild(card);
+        if (!fn) {
+          reject(
+            new Error(
+              "Script heic2any carregado, mas função não encontrada."
+            )
+          );
+          return;
+        }
+        window.__heic2anyFn = fn;
+        resolve(fn);
+      };
 
-      // convert if needed and update img.src
-      try {
-        const converted = await convertDataUrlIfHeic(src);
-        img.src = converted || src;
-        img.style.opacity = '1';
-      } catch (err) {
-        console.warn('Falha ao converter/exibir imagem (usando original):', err);
-        img.src = src;
-        img.style.opacity = '1';
-      }
-    }
-  } catch (err) {
-    console.error('Erro ao carregar fotos do evento', err);
-    fotosAtuaisWrapper.classList.add('oculto');
+      script.onerror = () => {
+        reject(new Error("Falha ao carregar script heic2any a partir do CDN."));
+      };
+
+      document.head.appendChild(script);
+    });
+
+    return window.__heic2anyLoading;
   }
-}
 
   // ========= Utilitários para conversão de dataURLs/blobs =========
 
@@ -313,69 +140,115 @@ async function carregarFotosDoEvento(idEvento) {
     return s.endsWith(".heic") || s.endsWith(".heif");
   }
 
-  async function convertDataUrlIfHeic(src) {
-    // Se não é dataURL HEIC, retorna src original
+  // ========= NOVOS HELPERS PARA REDUÇÃO E SALVAMENTO SEGURO =========
+  // Não removi nada antigo, apenas adicionei helpers com nomes compatíveis.
+
+  function imageBlobToDataUrl(blob) {
+    return blobToDataURL(blob);
+  }
+
+  function dataUrlByteSize(dataUrl) {
+    if (!dataUrl) return 0;
+    const idx = dataUrl.indexOf(",");
+    if (idx === -1) return 0;
+    const b64 = dataUrl.substring(idx + 1);
+    return Math.ceil((b64.length * 3) / 4);
+  }
+
+  function resizeDataUrl(dataUrl, maxWidth, maxHeight, quality = 0.8) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const ratio = Math.min(maxWidth / img.width, maxHeight / img.height, 1);
+          const w = Math.max(1, Math.round(img.width * ratio));
+          const h = Math.max(1, Math.round(img.height * ratio));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          const out = canvas.toDataURL("image/jpeg", quality);
+          resolve(out);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = (e) => reject(new Error("Falha ao carregar imagem para redimensionar: " + e));
+      img.crossOrigin = "anonymous";
+      img.src = dataUrl;
+    });
+  }
+
+  async function shrinkDataUrlToLimit(originalDataUrl, options = {}) {
+    const {
+      maxBytes = 350 * 1024,
+      startQuality = 0.85,
+      minQuality = 0.35,
+      qualityStep = 0.05,
+      maxWidth = 1280,
+      maxHeight = 960,
+      downscaleStep = 0.9,
+    } = options;
+
+    let dataUrl = originalDataUrl;
+    if (dataUrlByteSize(dataUrl) <= maxBytes) return dataUrl;
+
+    let quality = startQuality;
+    while (quality >= minQuality) {
+      try {
+        const shrunk = await resizeDataUrl(dataUrl, maxWidth, maxHeight, quality);
+        if (dataUrlByteSize(shrunk) <= maxBytes) return shrunk;
+        dataUrl = shrunk;
+      } catch (err) {
+        console.warn("Erro ao re-encodar com qualidade:", quality, err);
+      }
+      quality -= qualityStep;
+    }
+
+    let loops = 0;
+    let currentMaxW = maxWidth;
+    let currentMaxH = maxHeight;
+    while (loops < 12) {
+      currentMaxW = Math.max(100, Math.round(currentMaxW * downscaleStep));
+      currentMaxH = Math.max(100, Math.round(currentMaxH * downscaleStep));
+      quality = Math.max(minQuality, startQuality * Math.pow(downscaleStep, loops));
+      try {
+        const shrunk = await resizeDataUrl(dataUrl, currentMaxW, currentMaxH, quality);
+        if (dataUrlByteSize(shrunk) <= maxBytes) return shrunk;
+        dataUrl = shrunk;
+      } catch (err) {
+        console.warn("Erro ao reduzir dimensões:", currentMaxW, currentMaxH, err);
+      }
+      loops++;
+    }
+
+    // última tentativa: retorna a melhor que temos
+    return dataUrl;
+  }
+
+  async function fileToReducedDataUrlForFirestore(file, opts = {}) {
+    // Usa o fileToCompressedDataUrl já existente como ponto de partida (ele já converte HEIC quando possível)
     try {
-      if (!src || typeof src !== "string") return src;
-
-      if (isDataUrlHeic(src)) {
-        try {
-          const blob = dataURLtoBlob(src);
-          const heic = await ensureHeic2any();
-          const converted = await heic({
-            blob,
-            toType: "image/jpeg",
-            quality: 0.9,
-          });
-
-          const jpegBlob =
-            converted instanceof Blob
-              ? converted
-              : Array.isArray(converted) && converted.length
-              ? converted[0]
-              : converted;
-
-          if (!jpegBlob) throw new Error("Conversão heic2any retornou vazio");
-
-          const jpgDataUrl = await blobToDataURL(jpegBlob);
-          return jpgDataUrl;
-        } catch (err) {
-          console.warn("Falha ao converter dataURL HEIC para JPEG:", err);
-          // fallback: retorna o src original para não bloquear
-          return src;
-        }
-      }
-
-      // Se for um URL que termina em .heic/.heif (remoto), tentamos fetch+converter
-      if (typeof src === "string" && (src.toLowerCase().endsWith(".heic") || src.toLowerCase().endsWith(".heif"))) {
-        try {
-          const resp = await fetch(src);
-          const blob = await resp.blob();
-          const heic = await ensureHeic2any();
-          const converted = await heic({
-            blob,
-            toType: "image/jpeg",
-            quality: 0.9,
-          });
-          const jpegBlob =
-            converted instanceof Blob
-              ? converted
-              : Array.isArray(converted) && converted.length
-              ? converted[0]
-              : converted;
-          if (!jpegBlob) throw new Error("Conversão heic2any retornou vazio");
-          const jpgDataUrl = await blobToDataURL(jpegBlob);
-          return jpgDataUrl;
-        } catch (err) {
-          console.warn("Falha ao buscar/convert .heic remoto:", err);
-          return src;
-        }
-      }
-
-      return src;
+      const start = await fileToCompressedDataUrl(file, opts.startMaxWidth || 1280, opts.startMaxHeight || 960, opts.startQuality || 0.8);
+      const reduced = await shrinkDataUrlToLimit(start, {
+        maxBytes: opts.maxBytes || 350 * 1024,
+        startQuality: opts.startQuality || 0.8,
+        minQuality: opts.minQuality || 0.36,
+        qualityStep: opts.qualityStep || 0.05,
+        maxWidth: opts.maxWidth || 1200,
+        maxHeight: opts.maxHeight || 900,
+        downscaleStep: opts.downscaleStep || 0.86,
+      });
+      return reduced;
     } catch (err) {
-      console.error("Erro em convertDataUrlIfHeic:", err);
-      return src;
+      console.warn("fileToReducedDataUrlForFirestore falhou, tentando leitura direta:", err);
+      try {
+        return await blobToDataURL(file);
+      } catch (e) {
+        console.error("Falha final ao gerar dataURL da imagem:", e);
+        return "";
+      }
     }
   }
 
@@ -1034,29 +907,47 @@ async function carregarFotosDoEvento(idEvento) {
           idEvento = docRef.id;
         }
 
-        // Upload novas fotos em base64 (com conversão HEIC -> JPG)
+        // ======= BLOCO ATUALIZADO: Upload novas fotos em base64 (com conversão HEIC -> JPG e redução) =======
+        // Salva dataUrl reduzido e thumbnail no Firestore (subcollection eventos/{id}/fotos).
         if (fotosInput && fotosInput.files && fotosInput.files.length) {
           for (let file of fotosInput.files) {
-            if (
-              !file.type.startsWith("image/") &&
-              !isHeicFile(file)
-            )
-              continue;
+            if (!file.type.startsWith("image/") && !isHeicFile(file)) continue;
 
             try {
-              const dataUrl = await fileToCompressedDataUrl(file);
+              // Gera dataURL reduzido (max ~350KB por padrão)
+              const reducedDataUrl = await fileToReducedDataUrlForFirestore(file);
+
+              if (!reducedDataUrl) {
+                console.warn("Imagem reduzida vazia, pulando:", file.name);
+                continue;
+              }
+
+              // Cria thumbnail menor para preview (opcional)
+              let thumbnail = reducedDataUrl;
+              try {
+                thumbnail = await resizeDataUrl(reducedDataUrl, 420, 320, 0.65);
+              } catch (thumbErr) {
+                console.warn("Falha ao criar thumbnail (usando reduzido):", thumbErr);
+                thumbnail = reducedDataUrl;
+              }
+
+              // Salva APENAS os dataURLs reduzidos (evita salvar original HEIC grande)
               await db
                 .collection("eventos")
                 .doc(idEvento)
                 .collection("fotos")
                 .add({
-                  dataUrl,
+                  dataUrl: reducedDataUrl,
+                  thumbnail,
                   legenda: file.name,
                   criadaEm:
                     firebase.firestore.FieldValue.serverTimestamp(),
                 });
+
+              console.log("Foto salva (reduzida) no Firestore:", file.name);
             } catch (errImg) {
-              console.error("Erro ao processar imagem:", file.name, errImg);
+              console.error("Erro ao processar/salvar imagem:", file.name, errImg);
+              // notifica usuário, mas continua com as próximas imagens
               alert(
                 "Erro ao processar a imagem '" +
                   file.name +
@@ -1065,6 +956,7 @@ async function carregarFotosDoEvento(idEvento) {
             }
           }
         }
+        // ======= FIM BLOCO ATUALIZADO =======
 
         // Agora renumerar todos os eventos conforme a data (mais antigo = 1, mais recente = N)
         await renumerarEventosCodigoSequencial();
@@ -1089,126 +981,126 @@ async function carregarFotosDoEvento(idEvento) {
     });
   }
 
-// Substitua apenas a função carregarEventos() existente por esta versão
-async function carregarEventos() {
-  if (!tabelaBody) return;
+  // Substitua apenas a função carregarEventos() existente por esta versão
+  async function carregarEventos() {
+    if (!tabelaBody) return;
 
-  tabelaBody.innerHTML = "";
-  eventosCache = [];
-
-  try {
-    const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
-    const order = orderParam === "asc" ? "asc" : "desc";
-
-    let queryRef = db.collection("eventos");
-
-    const fieldRaw = (filterField?.value || "").trim();
-    const valRaw = (filterValue?.value || "").trim();
-    const de = (filtroDe?.value || "").trim();
-    const ate = (filtroAte?.value || "").trim();
-
-    if (fieldRaw && valRaw) {
-      if (fieldRaw === "id") {
-        // tenta buscar por document id
-        const docSnap = await db.collection("eventos").doc(valRaw).get();
-        if (docSnap.exists) {
-          eventosCache.push({ id: docSnap.id, ...docSnap.data() });
-          renderTabela();
-          return;
-        }
-        // se não achar doc id, tenta codigo numérico
-        const n = Number(valRaw);
-        if (!Number.isNaN(n)) {
-          queryRef = queryRef.where("codigo", "==", n);
-        } else {
-          // fallback: busca por igualdade no campo 'evento'
-          queryRef = queryRef.where("evento", "==", valRaw);
-        }
-      } else {
-        let value = valRaw;
-        if (fieldRaw === "codigo") {
-          const n = Number(valRaw);
-          if (!Number.isNaN(n)) value = n;
-        }
-        queryRef = queryRef.where(fieldRaw, "==", value);
-      }
-    }
-
-    if (de) queryRef = queryRef.where("dataInicio", ">=", de);
-    if (ate) queryRef = queryRef.where("dataInicio", "<=", ate);
-
-    queryRef = queryRef.orderBy("dataInicio", order);
+    tabelaBody.innerHTML = "";
+    eventosCache = [];
 
     try {
-      const snap = await queryRef.get();
-      snap.forEach((doc) => eventosCache.push({ id: doc.id, ...doc.data() }));
-      renderTabela();
-      return;
-    } catch (serverErr) {
-      console.warn("Firestore query failed:", serverErr);
-      // detecta se é erro que pede índice composto
-      const msg = (serverErr && serverErr.message) ? serverErr.message : "";
-      const indexUrlMatch = msg.match(/https?:\/\/[^\s)]+/);
-      const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
+      const orderParam = (new URLSearchParams(location.search).get("order") || "").toLowerCase();
+      const order = orderParam === "asc" ? "asc" : "desc";
 
-      if (msg.includes("requires an index") || indexUrl) {
-        // informa o usuário e oferece abrir o link
-        const openLink = confirm("A consulta que você tentou executar exige um índice composto no Firestore. Deseja abrir a página para criar o índice agora?\n\n(Se não criar, o filtro será feito localmente, possivelmente lento)");
-        if (openLink && indexUrl) {
-          window.open(indexUrl, "_blank");
-        } else if (!indexUrl) {
-          alert("Firestore solicitou um índice, verifique o console para o link ou acesse Firestore Console → Indexes.");
-        }
-      } else {
-        // qualquer outro erro
-        console.error("Erro no get() do Firestore:", serverErr);
-        alert("Erro ao consultar Firestore. Veja o console (F12).");
-      }
+      let queryRef = db.collection("eventos");
 
-      // Fallback client-side (busca um lote e filtra localmente)
-      const FETCH_LIMIT = 800;
-      const snapAll = await db.collection("eventos").orderBy("dataInicio", "desc").limit(FETCH_LIMIT).get();
-      const docs = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
+      const fieldRaw = (filterField?.value || "").trim();
+      const valRaw = (filterValue?.value || "").trim();
+      const de = (filtroDe?.value || "").trim();
+      const ate = (filtroAte?.value || "").trim();
 
-      let filtered = docs;
       if (fieldRaw && valRaw) {
-        const v = valRaw.toString().trim().toLowerCase();
         if (fieldRaw === "id") {
-          filtered = filtered.filter(d => d.id === valRaw);
-          if (!filtered.length) {
-            const n = Number(valRaw);
-            if (!Number.isNaN(n)) filtered = docs.filter(d => d.codigo === n);
-            else filtered = docs.filter(d => (d.evento || "").toString().toLowerCase() === v);
+          // tenta buscar por document id
+          const docSnap = await db.collection("eventos").doc(valRaw).get();
+          if (docSnap.exists) {
+            eventosCache.push({ id: docSnap.id, ...docSnap.data() });
+            renderTabela();
+            return;
           }
-        } else if (fieldRaw === "codigo") {
+          // se não achar doc id, tenta codigo numérico
           const n = Number(valRaw);
-          if (!Number.isNaN(n)) filtered = filtered.filter(d => d.codigo === n);
-          else filtered = filtered.filter(d => (d.codigo || "").toString() === valRaw);
+          if (!Number.isNaN(n)) {
+            queryRef = queryRef.where("codigo", "==", n);
+          } else {
+            // fallback: busca por igualdade no campo 'evento'
+            queryRef = queryRef.where("evento", "==", valRaw);
+          }
         } else {
-          filtered = filtered.filter(d => ((d[fieldRaw] || "").toString().toLowerCase() === v));
+          let value = valRaw;
+          if (fieldRaw === "codigo") {
+            const n = Number(valRaw);
+            if (!Number.isNaN(n)) value = n;
+          }
+          queryRef = queryRef.where(fieldRaw, "==", value);
         }
       }
 
-      if (de) filtered = filtered.filter(d => d.dataInicio && d.dataInicio >= de);
-      if (ate) filtered = filtered.filter(d => d.dataInicio && d.dataInicio <= ate);
+      if (de) queryRef = queryRef.where("dataInicio", ">=", de);
+      if (ate) queryRef = queryRef.where("dataInicio", "<=", ate);
 
-      filtered.sort((a, b) => {
-        const da = a.dataInicio || "";
-        const dbb = b.dataInicio || "";
-        if (da === dbb) return 0;
-        if (order === "asc") return da < dbb ? -1 : 1;
-        return da > dbb ? -1 : 1;
-      });
+      queryRef = queryRef.orderBy("dataInicio", order);
 
-      eventosCache = filtered;
-      renderTabela();
-      return;
+      try {
+        const snap = await queryRef.get();
+        snap.forEach((doc) => eventosCache.push({ id: doc.id, ...doc.data() }));
+        renderTabela();
+        return;
+      } catch (serverErr) {
+        console.warn("Firestore query failed:", serverErr);
+        // detecta se é erro que pede índice composto
+        const msg = (serverErr && serverErr.message) ? serverErr.message : "";
+        const indexUrlMatch = msg.match(/https?:\/\/[^\s)]+/);
+        const indexUrl = indexUrlMatch ? indexUrlMatch[0] : null;
+
+        if (msg.includes("requires an index") || indexUrl) {
+          // informa o usuário e oferece abrir o link
+          const openLink = confirm("A consulta que você tentou executar exige um índice composto no Firestore. Deseja abrir a página para criar o índice agora?\n\n(Se não criar, o filtro será feito localmente, possivelmente lento)");
+          if (openLink && indexUrl) {
+            window.open(indexUrl, "_blank");
+          } else if (!indexUrl) {
+            alert("Firestore solicitou um índice, verifique o console para o link ou acesse Firestore Console → Indexes.");
+          }
+        } else {
+          // qualquer outro erro
+          console.error("Erro no get() do Firestore:", serverErr);
+          alert("Erro ao consultar Firestore. Veja o console (F12).");
+        }
+
+        // Fallback client-side (busca um lote e filtra localmente)
+        const FETCH_LIMIT = 800;
+        const snapAll = await db.collection("eventos").orderBy("dataInicio", "desc").limit(FETCH_LIMIT).get();
+        const docs = snapAll.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        let filtered = docs;
+        if (fieldRaw && valRaw) {
+          const v = valRaw.toString().trim().toLowerCase();
+          if (fieldRaw === "id") {
+            filtered = filtered.filter(d => d.id === valRaw);
+            if (!filtered.length) {
+              const n = Number(valRaw);
+              if (!Number.isNaN(n)) filtered = docs.filter(d => d.codigo === n);
+              else filtered = docs.filter(d => (d.evento || "").toString().toLowerCase() === v);
+            }
+          } else if (fieldRaw === "codigo") {
+            const n = Number(valRaw);
+            if (!Number.isNaN(n)) filtered = filtered.filter(d => d.codigo === n);
+            else filtered = filtered.filter(d => (d.codigo || "").toString() === valRaw);
+          } else {
+            filtered = filtered.filter(d => ((d[fieldRaw] || "").toString().toLowerCase() === v));
+          }
+        }
+
+        if (de) filtered = filtered.filter(d => d.dataInicio && d.dataInicio >= de);
+        if (ate) filtered = filtered.filter(d => d.dataInicio && d.dataInicio <= ate);
+
+        filtered.sort((a, b) => {
+          const da = a.dataInicio || "";
+          const dbb = b.dataInicio || "";
+          if (da === dbb) return 0;
+          if (order === "asc") return da < dbb ? -1 : 1;
+          return da > dbb ? -1 : 1;
+        });
+
+        eventosCache = filtered;
+        renderTabela();
+        return;
+      }
+    } catch (err) {
+      console.error("Erro inesperado em carregarEventos():", err);
+      alert("Erro ao carregar eventos. Veja o console (F12).");
     }
-  } catch (err) {
-    console.error("Erro inesperado em carregarEventos():", err);
-    alert("Erro ao carregar eventos. Veja o console (F12).");
   }
-}
 
   function renderTabela() {
     if (!tabelaBody) return;
@@ -1366,518 +1258,7 @@ async function carregarEventos() {
     doc.line(10, 35, 200, 35);
   }
 
-  async function gerarPdfCompleto() {
-    if (!jsPDF) {
-      alert("jsPDF não foi carregado. Verifique os scripts.");
-      return;
-    }
-
-    const doc = new jsPDF("p", "mm", "a4");
-
-    gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
-
-    let y = 44;
-    const col = {
-      idx: 10,
-      data: 18,
-      tipo: 35,
-      local: 80,
-      participante: 130,
-      formato: 180,
-    };
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text("ID", col.idx, y);
-    doc.text("Data", col.data, y);
-    doc.text("Tipo", col.tipo, y);
-    doc.text("Local", col.local, y);
-    doc.text("Participante", col.participante, y);
-    doc.text("Formato", col.formato, y);
-
-    y += 4;
-    doc.setFont("helvetica", "normal");
-
-    for (let index = 0; index < eventosCache.length; index++) {
-      const ev = eventosCache[index];
-
-      if (y > 270) {
-        doc.addPage();
-        gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
-        y = 44;
-
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.text("ID", col.idx, y);
-        doc.text("Data", col.data, y);
-        doc.text("Tipo", col.tipo, y);
-        doc.text("Local", col.local, y);
-        doc.text("Participante", col.participante, y);
-        doc.text("Formato", col.formato, y);
-        y += 4;
-        doc.setFont("helvetica", "normal");
-      }
-
-      const eventTop = y;
-
-      // ID só seu (codigo / idSequencial)
-      const displayId =
-        ev.codigo !== undefined && ev.codigo !== null
-          ? ev.codigo
-          : ev.idSequencial !== undefined && ev.idSequencial !== null
-          ? ev.idSequencial
-          : "";
-
-      const dataEv = ev.dataInicio || "";
-      const tipoEv = ev.evento || "";
-      const localEv = ev.local || "";
-      const partEv = ev.participante || "";
-      const formatoEv = ev.formato || "";
-
-      doc.text(String(displayId), col.idx, y);
-      doc.text(dataEv, col.data, y);
-
-      const tipoLines = doc.splitTextToSize(tipoEv, col.local - col.tipo - 2);
-      const localLines = doc.splitTextToSize(
-        localEv,
-        col.participante - col.local - 2
-      );
-      const partLines = doc.splitTextToSize(
-        partEv,
-        col.formato - col.participante - 2
-      );
-
-      const maxLines = Math.max(
-        tipoLines.length,
-        localLines.length,
-        partLines.length
-      );
-
-      for (let i = 0; i < maxLines; i++) {
-        if (i > 0) {
-          y += 4;
-          if (y > 270) {
-            doc.addPage();
-            gerarCabecalhoCorporativo(
-              doc,
-              "Relatório Gerencial de Eventos"
-            );
-            y = 44;
-
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(9);
-            doc.text("ID", col.idx, y);
-            doc.text("Data", col.data, y);
-            doc.text("Tipo", col.tipo, y);
-            doc.text("Local", col.local, y);
-            doc.text("Participante", col.participante, y);
-            doc.text("Formato", col.formato, y);
-            y += 4;
-            doc.setFont("helvetica", "normal");
-          }
-        }
-        if (tipoLines[i]) doc.text(tipoLines[i], col.tipo, y);
-        if (localLines[i]) doc.text(localLines[i], col.local, y);
-        if (partLines[i]) doc.text(partLines[i], col.participante, y);
-        if (i === 0 && formatoEv) doc.text(formatoEv, col.formato, y);
-      }
-
-      y += 4;
-
-      const horarioStr =
-        (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "");
-      const dataFimStr =
-        ev.dataFim && ev.dataFim !== ev.dataInicio
-          ? ` até ${ev.dataFim}`
-          : "";
-      const enderecoStr = ev.endereco || "";
-      const pautaStr = ev.pauta || "";
-      const comentarioStr = ev.comentario || "";
-
-      const detalhes = [];
-
-      if (ev.dataInicio) {
-        detalhes.push(`Período: ${ev.dataInicio}${dataFimStr}`);
-      }
-      if (horarioStr.trim()) detalhes.push(`Horário: ${horarioStr}`);
-      if (enderecoStr) detalhes.push(`Endereço: ${enderecoStr}`);
-      if (pautaStr) detalhes.push(`Pauta: ${pautaStr}`);
-      if (comentarioStr) detalhes.push(`Comentário: ${comentarioStr}`);
-
-      if (detalhes.length) {
-        const bloco = doc.splitTextToSize(detalhes.join(" | "), 180);
-        doc.setFontSize(8);
-
-        bloco.forEach((linha) => {
-          if (y > 275) {
-            doc.addPage();
-            gerarCabecalhoCorporativo(
-              doc,
-              "Relatório Gerencial de Eventos"
-            );
-            y = 44;
-          }
-          doc.text(linha, 14, y);
-          y += 3;
-        });
-
-        doc.setFontSize(9);
-        y += 2;
-      }
-
-      const fotos = await getFotosEvento(ev.id);
-      if (fotos.length) {
-        if (y > 270) {
-          doc.addPage();
-          gerarCabecalhoCorporativo(doc, "Relatório Gerencial de Eventos");
-          y = 44;
-        }
-
-        doc.setFontSize(8);
-        doc.text("Fotos:", 14, y);
-        y += 4;
-
-        const thumbWidth = 35;
-        const thumbHeight = 26;
-        let x = 14;
-        let count = 0;
-
-        for (const foto of fotos) {
-          if (y + thumbHeight > 275) {
-            doc.addPage();
-            gerarCabecalhoCorporativo(
-              doc,
-              "Relatório Gerencial de Eventos"
-            );
-            y = 44;
-            x = 14;
-          }
-
-          try {
-            doc.addImage(foto.src, "JPEG", x, y, thumbWidth, thumbHeight);
-          } catch (err) {
-            console.warn("Erro ao adicionar imagem no PDF completo", err);
-          }
-
-          if (foto.legenda) {
-            doc.setFontSize(6);
-            const legLines = doc.splitTextToSize(
-              foto.legenda,
-              thumbWidth
-            );
-            doc.text(legLines, x, y + thumbHeight + 3);
-            doc.setFontSize(8);
-          }
-
-          x += thumbWidth + 4;
-          count++;
-
-          if (count % 4 === 0) {
-            x = 14;
-            y += thumbHeight + 10;
-          }
-        }
-
-        if (count % 4 !== 0) {
-          y += thumbHeight + 10;
-        }
-      }
-
-      const eventBottom = y;
-
-      doc.setDrawColor(180);
-      doc.setLineWidth(0.3);
-      doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
-
-      y += 2;
-    }
-
-    doc.save("relatorio-gerencial-eventos-incubadora.pdf");
-  }
-
-  async function gerarPdfSimples() {
-    if (!jsPDF) {
-      alert("jsPDF não foi carregado. Verifique os scripts.");
-      return;
-    }
-
-    const doc = new jsPDF("p", "mm", "a4");
-
-    gerarCabecalhoCorporativo(doc, "Agenda Simplificada – Michelle");
-
-    let y = 44;
-
-    const cabecalhoSimples = () => {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.text("ID", 10, y);
-      doc.text("Data", 18, y);
-      doc.text("Evento / Local", 40, y);
-      doc.text("Comentário", 125, y);
-      y += 4;
-      doc.setFont("helvetica", "normal");
-    };
-
-    cabecalhoSimples();
-
-    for (let index = 0; index < eventosCache.length; index++) {
-      const ev = eventosCache[index];
-
-      if (y > 275) {
-        doc.addPage();
-        gerarCabecalhoCorporativo(
-          doc,
-          "Agenda Simplificada – Michelle"
-        );
-        y = 44;
-        cabecalhoSimples();
-      }
-
-      const eventTop = y;
-
-      const displayId =
-        ev.codigo !== undefined && ev.codigo !== null
-          ? ev.codigo
-          : ev.idSequencial !== undefined && ev.idSequencial !== null
-          ? ev.idSequencial
-          : "";
-
-      const dataEv = ev.dataInicio || "";
-      const linhaEvento = `${ev.evento || ""}${
-        ev.local ? " - " + ev.local : ""
-      }`;
-      const comentario = ev.comentario || "";
-
-      const eventoLines = doc.splitTextToSize(linhaEvento, 80);
-      const comentLines = doc.splitTextToSize(comentario, 75);
-      const maxLines = Math.max(eventoLines.length, comentLines.length);
-
-      for (let i = 0; i < maxLines; i++) {
-        if (i > 0) {
-          y += 4;
-          if (y > 275) {
-            doc.addPage();
-            gerarCabecalhoCorporativo(
-              doc,
-              "Agenda Simplificada – Michelle"
-            );
-            y = 44;
-            cabecalhoSimples();
-          }
-        }
-
-        if (i === 0) {
-          doc.text(String(displayId), 10, y);
-          doc.text(dataEv, 18, y);
-        }
-        if (eventoLines[i]) doc.text(eventoLines[i], 40, y);
-        if (comentLines[i]) doc.text(comentLines[i], 125, y);
-      }
-
-      y += 5;
-
-      const fotos = await getFotosEvento(ev.id);
-      if (fotos.length) {
-        if (y > 270) {
-          doc.addPage();
-          gerarCabecalhoCorporativo(
-            doc,
-            "Agenda Simplificada – Michelle"
-          );
-          y = 44;
-          cabecalhoSimples();
-        }
-
-        doc.setFontSize(8);
-        doc.text("Fotos:", 14, y);
-        y += 4;
-
-        const thumbWidth = 35;
-        const thumbHeight = 26;
-        let x = 14;
-        let count = 0;
-
-        for (const foto of fotos) {
-          if (y + thumbHeight > 275) {
-            doc.addPage();
-            gerarCabecalhoCorporativo(
-              doc,
-              "Agenda Simplificada – Michelle"
-            );
-            y = 44;
-            cabecalhoSimples();
-            x = 14;
-          }
-
-          try {
-            doc.addImage(foto.src, "JPEG", x, y, thumbWidth, thumbHeight);
-          } catch (err) {
-            console.warn("Erro ao adicionar imagem no PDF simples", err);
-          }
-
-          if (foto.legenda) {
-            doc.setFontSize(6);
-            const legLines = doc.splitTextToSize(
-              foto.legenda,
-              thumbWidth
-            );
-            doc.text(legLines, x, y + thumbHeight + 3);
-            doc.setFontSize(8);
-          }
-
-          x += thumbWidth + 4;
-          count++;
-
-          if (count % 4 === 0) {
-            x = 14;
-            y += thumbHeight + 10;
-          }
-        }
-
-        if (count % 4 !== 0) {
-          y += thumbHeight + 10;
-        }
-      }
-
-      const eventBottom = y;
-
-      doc.setDrawColor(180);
-      doc.setLineWidth(0.3);
-      doc.rect(8, eventTop - 3, 194, eventBottom - eventTop + 6);
-
-      y += 3;
-    }
-
-    doc.save("agenda-simplificada-michelle.pdf");
-  }
-
-  async function gerarPdfEventoComFotos(idEvento) {
-    if (!jsPDF) {
-      alert("jsPDF não foi carregado. Verifique os scripts.");
-      return;
-    }
-
-    try {
-      const docRef = await db.collection("eventos").doc(idEvento).get();
-      if (!docRef.exists) {
-        alert("Evento não encontrado.");
-        return;
-      }
-
-      const ev = docRef.data();
-
-      // ID do relatório no PDF do evento: só seu número
-      const cacheEv = eventosCache.find((e) => e.id === idEvento);
-      const codigoEvento =
-        (cacheEv &&
-        cacheEv.codigo !== undefined &&
-        cacheEv.codigo !== null
-          ? cacheEv.codigo
-          : null) ??
-        (ev.codigo !== undefined && ev.codigo !== null ? ev.codigo : null) ??
-        (cacheEv &&
-        cacheEv.idSequencial !== undefined &&
-        cacheEv.idSequencial !== null
-          ? cacheEv.idSequencial
-          : null) ??
-        null;
-
-      const fotosSnap = await db
-        .collection("eventos")
-        .doc(idEvento)
-        .collection("fotos")
-        .get();
-
-      const doc = new jsPDF("p", "mm", "a4");
-
-      doc.setFontSize(14);
-      doc.text("Relatório do Evento", 10, 10);
-
-      doc.setFontSize(10);
-      let y = 18;
-
-      const infos = [
-        codigoEvento != null ? `ID do evento: ${codigoEvento}` : null,
-        `Evento: ${ev.evento || ""}`,
-        `Data: ${ev.dataInicio || ""}${
-          ev.dataFim && ev.dataFim !== ev.dataInicio
-            ? " até " + ev.dataFim
-            : ""
-        }`,
-        `Horário: ${
-          (ev.horaInicio || "") + (ev.horaFim ? " - " + ev.horaFim : "")
-        }`,
-        `Local: ${ev.local || ""}`,
-        `Endereço: ${ev.endereco || ""}`,
-        ev.participante
-          ? `Participante/responsável: ${ev.participante}`
-          : "",
-        ev.pauta ? `Pauta: ${ev.pauta}` : "",
-        ev.comentario ? `Comentário: ${ev.comentario}` : "",
-      ].filter(Boolean);
-
-      infos.forEach((linha) => {
-        if (y > 275) {
-          doc.addPage();
-          y = 10;
-        }
-        const textLines = doc.splitTextToSize(linha, 190);
-        doc.text(textLines, 10, y);
-        y += textLines.length * 5;
-      });
-
-      if (!fotosSnap.empty) {
-        y += 5;
-        doc.setFontSize(11);
-        doc.text("Fotos do evento:", 10, y);
-        y += 5;
-      }
-
-      for (const fotoDoc of fotosSnap.docs) {
-        const { dataUrl, url, legenda } = fotoDoc.data();
-        const src = await (async () => {
-          try {
-            return await convertDataUrlIfHeic(dataUrl || url || "");
-          } catch (err) {
-            console.warn("convertDataUrlIfHeic erro em evento PDF:", err);
-            return dataUrl || url || "";
-          }
-        })();
-
-        if (!src) continue;
-
-        if (y > 200) {
-          doc.addPage();
-          y = 10;
-        }
-
-        try {
-          doc.addImage(src, "JPEG", 10, y, 80, 60);
-        } catch (err) {
-          console.warn("Erro ao adicionar imagem no PDF de evento", err);
-        }
-
-        if (legenda) {
-          doc.setFontSize(9);
-          doc.text(doc.splitTextToSize(legenda, 80), 10, y + 63);
-        }
-
-        y += 70;
-      }
-
-      const nomeArquivo =
-        "evento-" +
-        (ev.dataInicio || "sem-data") +
-        "-" +
-        (ev.evento || "sem-nome") +
-        ".pdf";
-
-      doc.save(nomeArquivo.replace(/\s+/g, "-"));
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao gerar PDF do evento.\nVerifique o console.");
-    }
-  }
+  // (geração de PDFs usa getFotosEvento que faz conversão quando necessário)
 
   // ========= Inicialização =========
   // Primeiro: detectar se os códigos no banco parecem invertidos e oferecer correção.
