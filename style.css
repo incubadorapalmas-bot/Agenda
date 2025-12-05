@@ -157,6 +157,15 @@ html[data-theme="dark"] .topo {
   filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.15));
 }
 
+/* Ações do topo (botões PDF / tema) */
+.topo__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 @media (max-width: 600px) {
   .topo__branding {
     flex-direction: column;
@@ -165,6 +174,10 @@ html[data-theme="dark"] .topo {
 
   .logo {
     height: 26px;
+  }
+
+  .topo__actions {
+    justify-content: flex-start;
   }
 }
 
@@ -200,9 +213,11 @@ html[data-theme="dark"] .topo {
 }
 
 html[data-theme="dark"] .card {
-  background: radial-gradient(circle at top left,
+  background: radial-gradient(
+      circle at top left,
       rgba(15, 23, 42, 0.96),
-      rgba(15, 23, 42, 0.98));
+      rgba(15, 23, 42, 0.98)
+  );
 }
 
 /* pequena borda de luz no topo do card */
@@ -284,7 +299,8 @@ html[data-theme="dark"] .btn.secundario {
 }
 
 /* Toggle tema */
-.toggle-tema {
+.toggle-tema,
+#btnToggleTema {
   min-width: 2.35rem;
   justify-content: center;
 }
@@ -383,6 +399,14 @@ small {
   color: var(--cor-texto-suave);
 }
 
+/* Grupo de botões do formulário */
+.botoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 /* ========= Drop area para fotos ========= */
 .drop-area {
   border-radius: 0.9rem;
@@ -415,22 +439,32 @@ small {
   box-shadow: 0 10px 26px rgba(0, 143, 76, 0.35);
 }
 
-/* ========= Fotos atuais ========= */
+/* Pré-visualização das novas fotos */
+.preview {
+  margin-top: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.5rem;
+}
+
+/* ========= Fotos atuais (evento) ========= */
+#fotos-section {
+  margin-top: 1rem;
+}
+
+#fotos-section h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
 .fotos-atuais {
-  margin-top: 0.75rem;
+  margin-top: 0.25rem;
   padding: 0.75rem;
   border-radius: 0.9rem;
   border: 1px solid var(--cor-borda);
   background: rgba(15, 23, 42, 0.02);
 }
-
-.mini-foto {
-  max-width: 80px;
-  max-height: 60px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-
 
 html[data-theme="dark"] .fotos-atuais {
   background: rgba(15, 23, 42, 0.7);
@@ -475,16 +509,12 @@ html[data-theme="dark"] .foto-thumb {
   color: var(--cor-texto-suave);
 }
 
-.novas-fotos {
-  margin-top: 0.4rem;
-}
-
-/* ========= Botões formulário ========= */
-.botoes-form {
-  margin-top: 0.5rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+/* miniatura usada na tabela */
+.mini-foto {
+  max-width: 80px;
+  max-height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
 }
 
 /* ========= Lista e tabela ========= */
@@ -503,7 +533,7 @@ html[data-theme="dark"] .foto-thumb {
   }
 }
 
-/* Filtros com visual de chip */
+/* Filtros */
 .filtros {
   display: flex;
   flex-wrap: wrap;
@@ -512,7 +542,8 @@ html[data-theme="dark"] .foto-thumb {
   font-size: 0.8rem;
 }
 
-.filtros label {
+/* Se usar labels "chip" em algum lugar de filtros */
+.filtros label.chip {
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -521,13 +552,15 @@ html[data-theme="dark"] .foto-thumb {
   background: rgba(148, 163, 184, 0.16);
 }
 
-.filtros input[type="date"] {
+.filtros input[type="date"].chip-input {
   padding-inline: 0.4rem;
   border-radius: 999px;
 }
 
 /* ========= Tabela ========= */
-.tabela-container {
+
+/* Wrapper usado no HTML */
+.table-responsive {
   width: 100%;
   overflow-x: auto;
   border-radius: 0.9rem;
@@ -540,6 +573,7 @@ html[data-theme="dark"] .foto-thumb {
   box-shadow: var(--shadow-suave);
 }
 
+/* Tabela em si */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -576,7 +610,9 @@ tbody td:first-child {
 tbody tr {
   border-top: 1px solid rgba(148, 163, 184, 0.28);
   cursor: pointer;
-  transition: background 0.08s ease, transform 0.08s ease,
+  transition:
+    background 0.08s ease,
+    transform 0.08s ease,
     box-shadow 0.08s ease;
 }
 
