@@ -1,22 +1,18 @@
 /* ==========================================
    Agenda Incubadora IFPR / PMP
    Tema 60–30–10 + Glassmorphism
-   - 60% neutros
-   - 30% verde institucional
-   - 10% âmbar (accent)
+   Ajustado para o HTML atual (topo com .topo__actions,
+   .table-responsive no markup, etc.)
 ========================================== */
 
 /* ========= Tema claro ========= */
 :root {
-  /* Primárias (30%) */
   --cor-primaria: #008f4c;
   --cor-primaria-escura: #006837;
 
-  /* Accent (10%) */
   --cor-accent: #f59e0b;
   --cor-accent-soft: rgba(245, 158, 11, 0.12);
 
-  /* Neutros (60%) */
   --cor-fundo: #eef1f5;
   --cor-fundo-gradiente-claro: #e3f5ed;
   --cor-fundo-gradiente-profundo: #d5e4ff;
@@ -28,12 +24,10 @@
   --cor-borda: rgba(148, 163, 184, 0.4);
   --cor-secundaria: #f5f5f7;
 
-  /* Sombras / vidro */
   --shadow-suave: 0 18px 45px rgba(15, 23, 42, 0.08);
   --shadow-forte: 0 26px 70px rgba(15, 23, 42, 0.16);
   --blur-forte: blur(18px);
 
-  /* Tabela */
   --linha-zebra: rgba(148, 163, 184, 0.07);
 }
 
@@ -73,6 +67,7 @@ body {
   color: var(--cor-texto);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1,
@@ -122,13 +117,21 @@ html[data-theme="dark"] .topo {
   justify-content: space-between;
   padding: 0.65rem 0.5rem;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
-/* Branding topo */
-.topo__branding {
+/* Branding topo (logos + titulo) */
+.topo__logos {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.45rem;
+}
+
+.topo__titulo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-left: 0.6rem;
 }
 
 .topo h1 {
@@ -143,35 +146,36 @@ html[data-theme="dark"] .topo {
   color: var(--cor-texto-suave);
 }
 
-/* Logos */
-.topo__logos {
+/* Menu / ações rápidas */
+.topo__actions {
+  margin-left: auto;
   display: flex;
+  gap: 0.5rem;
   align-items: center;
-  gap: 0.45rem;
 }
 
+/* logos */
 .logo {
-  height: 32px;
+  height: 36px;
   width: auto;
   object-fit: contain;
-  filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.15));
+  filter: drop-shadow(0 4px 8px rgba(15, 23, 42, 0.12));
 }
 
-@media (max-width: 600px) {
-  .topo__branding {
-    flex-direction: column;
-    align-items: flex-start;
+/* responsividade do topo */
+@media (max-width: 860px) {
+  .topo__conteudo {
+    gap: 0.5rem;
   }
-
-  .logo {
-    height: 26px;
-  }
+  .logo { height: 30px; }
+  .topo__actions { width: 100%; justify-content: flex-start; gap: 0.4rem; margin-top: 0.45rem; }
+  .topo__titulo { margin-left: 0.4rem; }
 }
 
 /* ========= Layout principal ========= */
 .principal {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.6fr);
   gap: 1rem;
   padding: 1rem 0 2.5rem;
 }
@@ -205,7 +209,6 @@ html[data-theme="dark"] .card {
       rgba(15, 23, 42, 0.98));
 }
 
-/* pequena borda de luz no topo do card */
 .card::before {
   content: "";
   position: absolute;
@@ -243,12 +246,6 @@ html[data-theme="dark"] .card {
   background: rgba(148, 163, 184, 0.3);
 }
 
-.btn:active {
-  transform: translateY(0);
-  box-shadow: none;
-}
-
-/* CTA principal: primária (30%) */
 .btn.primario {
   background: linear-gradient(
     135deg,
@@ -259,15 +256,6 @@ html[data-theme="dark"] .card {
   box-shadow: 0 10px 26px rgba(0, 143, 76, 0.4);
 }
 
-.btn.primario:hover {
-  background: linear-gradient(
-    135deg,
-    var(--cor-primaria-escura),
-    var(--cor-primaria)
-  );
-}
-
-/* Secundário: accent (10%) */
 .btn.secundario {
   background: var(--cor-accent-soft);
   color: #92400e;
@@ -277,16 +265,9 @@ html[data-theme="dark"] .btn.secundario {
   color: #fbbf24;
 }
 
-/* Botões de ação na tabela */
 .acao-col .btn {
   font-size: 0.7rem;
   padding-inline: 0.55rem;
-}
-
-/* Toggle tema */
-.toggle-tema {
-  min-width: 2.35rem;
-  justify-content: center;
 }
 
 /* ========= Formulário ========= */
@@ -295,11 +276,6 @@ html[data-theme="dark"] .btn.secundario {
   margin-bottom: 0.35rem;
   font-size: 1rem;
   font-weight: 600;
-}
-
-.subtexto {
-  font-size: 0.8rem;
-  color: var(--cor-texto-suave);
 }
 
 form {
@@ -313,18 +289,13 @@ form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
+  align-items: center;
 }
 
 @media (max-width: 800px) {
   .linha {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-.campo {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
 }
 
 label {
@@ -428,12 +399,6 @@ html[data-theme="dark"] .fotos-atuais {
   background: rgba(15, 23, 42, 0.7);
 }
 
-.fotos-atuais__titulo {
-  font-size: 0.8rem;
-  margin-bottom: 0.4rem;
-  color: var(--cor-texto-suave);
-}
-
 .fotos-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
@@ -467,18 +432,6 @@ html[data-theme="dark"] .foto-thumb {
   color: var(--cor-texto-suave);
 }
 
-.novas-fotos {
-  margin-top: 0.4rem;
-}
-
-/* ========= Botões formulário ========= */
-.botoes-form {
-  margin-top: 0.5rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 /* ========= Lista e tabela ========= */
 .cabecalho-lista {
   display: flex;
@@ -495,7 +448,6 @@ html[data-theme="dark"] .foto-thumb {
   }
 }
 
-/* Filtros com visual de chip */
 .filtros {
   display: flex;
   flex-wrap: wrap;
@@ -519,6 +471,8 @@ html[data-theme="dark"] .foto-thumb {
 }
 
 /* ========= Tabela ========= */
+/* suportar tanto .table-responsive (HTML) quanto .tabela-container (legacy) */
+.table-responsive,
 .tabela-container {
   width: 100%;
   overflow-x: auto;
@@ -530,6 +484,7 @@ html[data-theme="dark"] .foto-thumb {
     transparent 45%
   );
   box-shadow: var(--shadow-suave);
+  padding: 0.25rem;
 }
 
 table {
@@ -572,7 +527,6 @@ tbody tr {
     box-shadow 0.08s ease;
 }
 
-/* linhas zebradas para leitura mais rápida */
 tbody tr:nth-child(even) {
   background: var(--linha-zebra);
 }
@@ -617,6 +571,16 @@ tbody td {
 }
 
 /* ========= Utilitários ========= */
-.oculto {
-  display: none !important;
+.oculto { display: none !important; }
+
+/* pequenos ajustes visuais extras para o header buttons */
+.topo__actions .btn {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 480px) {
+  .topo__titulo h1 { font-size: 1rem; }
+  .topo__actions { gap: 0.35rem; }
+  .logo { height: 26px; }
 }
