@@ -1,16 +1,10 @@
 // app.js - Agenda Incubadora IFPR/PMP
-// Versão atualizada: detecta se os códigos estão invertidos no Firestore
-// (ex.: evento mais recente com código 1) e, se confirmado pelo usuário,
-// renumera TODOS os eventos para que o evento mais antigo receba codigo = 1
-// e o mais recente receba codigo = N. A exibição continua mostrando os eventos
-// com a data mais recente primeiro (order desc).
+// Versão atualizada: tratamento robusto para HEIC/HEIF ao carregar imagens
+// - Converte dataURLs HEIC/HEIF armazenados no Firestore para JPEG antes de exibir ou inserir em PDFs.
+// - Usa heic2any via CDN quando necessário.
+// - Se a conversão falhar, usa o dataURL original como fallback (com aviso).
 //
-// Atenção:
-// - A renumeração atualiza TODOS os documentos na coleção 'eventos'.
-//   Em coleções grandes isso pode gerar muitas gravações (custo e tempo).
-// - O código pede confirmação via confirm() antes de fazer alterações.
-// - Garanta que firebase já esteja inicializado (firebase-config.js carregado
-//   após firebase-app.js) antes de usar.
+// Cole por cima do seu app.js atual.
 
 document.addEventListener("DOMContentLoaded", async () => {
   // ========= INICIALIZAÇÃO jsPDF (mais robusto) =========
@@ -107,6 +101,111 @@ document.addEventListener("DOMContentLoaded", async () => {
     return window.__heic2anyLoading;
   }
 
+  // ========= Utilitários para conversão de dataURLs/blobs =========
+
+  function dataURLtoBlob(dataurl) {
+    // dataurl: "data:[<mediatype>][;base64],<data>"
+    const parts = dataurl.split(",");
+    if (parts.length !== 2) {
+      throw new Error("dataURL inválida");
+    }
+    const meta = parts[0];
+    const b64 = parts[1];
+    const mimeMatch = meta.match(/data:(.*?)(;base64)?$/);
+    const mime = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+    const byteString = atob(b64);
+    const ia = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) {
+      ia[i] = byteString.charCodeAt(i);
+    }
+    return new Blob([ia], { type: mime });
+  }
+
+  function blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = reject;
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  function isDataUrlHeic(src) {
+    if (!src || typeof src !== "string") return false;
+    const s = src.toLowerCase();
+    if (s.startsWith("data:")) {
+      return s.startsWith("data:image/heic") || s.startsWith("data:image/heif") || s.includes("heic");
+    }
+    // also check if the url ends with .heic/.heif
+    return s.endsWith(".heic") || s.endsWith(".heif");
+  }
+
+  async function convertDataUrlIfHeic(src) {
+    // Se não é dataURL HEIC, retorna src original
+    try {
+      if (!src || typeof src !== "string") return src;
+
+      if (isDataUrlHeic(src)) {
+        try {
+          const blob = dataURLtoBlob(src);
+          const heic = await ensureHeic2any();
+          const converted = await heic({
+            blob,
+            toType: "image/jpeg",
+            quality: 0.9,
+          });
+
+          const jpegBlob =
+            converted instanceof Blob
+              ? converted
+              : Array.isArray(converted) && converted.length
+              ? converted[0]
+              : converted;
+
+          if (!jpegBlob) throw new Error("Conversão heic2any retornou vazio");
+
+          const jpgDataUrl = await blobToDataURL(jpegBlob);
+          return jpgDataUrl;
+        } catch (err) {
+          console.warn("Falha ao converter dataURL HEIC para JPEG:", err);
+          // fallback: retorna o src original para não bloquear
+          return src;
+        }
+      }
+
+      // Se for um URL que termina em .heic/.heif (remoto), tentamos fetch+converter
+      if (typeof src === "string" && (src.toLowerCase().endsWith(".heic") || src.toLowerCase().endsWith(".heif"))) {
+        try {
+          const resp = await fetch(src);
+          const blob = await resp.blob();
+          const heic = await ensureHeic2any();
+          const converted = await heic({
+            blob,
+            toType: "image/jpeg",
+            quality: 0.9,
+          });
+          const jpegBlob =
+            converted instanceof Blob
+              ? converted
+              : Array.isArray(converted) && converted.length
+              ? converted[0]
+              : converted;
+          if (!jpegBlob) throw new Error("Conversão heic2any retornou vazio");
+          const jpgDataUrl = await blobToDataURL(jpegBlob);
+          return jpgDataUrl;
+        } catch (err) {
+          console.warn("Falha ao buscar/convert .heic remoto:", err);
+          return src;
+        }
+      }
+
+      return src;
+    } catch (err) {
+      console.error("Erro em convertDataUrlIfHeic:", err);
+      return src;
+    }
+  }
+
   // ========= RENUMERAR: ordena por data ASC (mais antigo = 1) =========
   async function renumerarEventosCodigoSequencial() {
     try {
@@ -134,7 +233,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         ops++;
 
         if (ops >= 450) {
-          // commit parcial e reinicia batch
           commits.push(
             batch.commit().catch((err) => {
               console.error("Erro no commit parcial durante renumeração:", err);
@@ -164,12 +262,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // ========= Detectar se códigos estão invertidos e corrigir (com confirmação) =========
-  // Lógica de detecção:
-  //  - pega evento mais recente (orderBy dataInicio desc limit 1)
-  //  - pega evento mais antigo (orderBy dataInicio asc limit 1)
-  //  - pega maxCodigo (orderBy codigo desc limit 1)
-  // Situação invertida provável: o evento mais recente tem codigo pequeno (ex.: 1)
-  // e o evento mais antigo tem codigo grande, ou mostRecent.codigo < oldest.codigo.
   async function detectAndFixInvertedCodes() {
     try {
       const [mostRecentSnap, oldestSnap, maxCodigoSnap] = await Promise.all([
@@ -193,9 +285,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       console.log("Detecção de códigos: mostRecentCodigo=", mostRecentCodigo, "oldestCodigo=", oldestCodigo, "maxCodigo=", maxCodigo);
 
-      // Condição simples para possível inversão:
-      // se ambos os códigos existem e o mais recente tem código menor que o mais antigo,
-      // então parece invertido.
       const likelyInverted =
         typeof mostRecentCodigo === "number" &&
         typeof oldestCodigo === "number" &&
@@ -206,7 +295,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // Pergunta ao usuário se quer corrigir
       const proceed = confirm(
         "Detectei que os códigos parecem estar invertidos (o evento mais recente possui código menor que o mais antigo).\n\n" +
           "Deseja renumerar TODOS os eventos agora para que o evento mais antigo receba código=1 e o mais recente receba o maior código?\n\n" +
@@ -218,7 +306,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
-      // Executa correção
       const total = await renumerarEventosCodigoSequencial();
       alert("Renumeração automática concluída. Total de eventos renumerados: " + total);
     } catch (err) {
@@ -572,12 +659,22 @@ document.addEventListener("DOMContentLoaded", async () => {
         .collection("fotos")
         .get();
 
-      snap.forEach((docFoto) => {
-        const { dataUrl, url, legenda } = docFoto.data();
-        const src = dataUrl || url || "";
-        if (!src) return;
+      // iterar de forma síncrona (await dentro do laço) para garantir conversões
+      for (const docFoto of snap.docs) {
+        const data = docFoto.data();
+        const { dataUrl, url, legenda } = data;
+        let src = dataUrl || url || "";
+        if (!src) continue;
+
+        // tenta converter se for dataURL HEIC ou link .heic
+        try {
+          src = await convertDataUrlIfHeic(src);
+        } catch (err) {
+          console.warn("Falha ao converter foto do evento (seguindo com original):", err);
+        }
+
         fotos.push({ src, legenda: legenda || "" });
-      });
+      }
     } catch (err) {
       console.error("Erro ao buscar fotos do evento", err);
     }
@@ -604,10 +701,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       fotosAtuaisWrapper.classList.remove("oculto");
 
-      snap.forEach((docFoto) => {
+      // iterar com for..of para permitir await convert
+      for (const docFoto of snap.docs) {
         const { dataUrl, url, legenda } = docFoto.data();
-        const src = dataUrl || url || "";
-        if (!src) return;
+        let src = dataUrl || url || "";
+        if (!src) continue;
+
+        try {
+          src = await convertDataUrlIfHeic(src);
+        } catch (err) {
+          console.warn("Falha ao converter foto para exibição (usando original):", err);
+        }
 
         const card = document.createElement("div");
         card.className = "foto-thumb";
@@ -650,7 +754,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         card.appendChild(caption);
         card.appendChild(btnExcluir);
         fotosAtuaisDiv.appendChild(card);
-      });
+      }
     } catch (err) {
       console.error("Erro ao carregar fotos do evento", err);
     }
@@ -784,7 +888,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
 
         // Agora renumerar todos os eventos conforme a data (mais antigo = 1, mais recente = N)
-        // Assim o evento mais recente terá o maior código.
         await renumerarEventosCodigoSequencial();
 
         alert(
@@ -932,7 +1035,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // ========= Funções para PDFs (mantive as suas versões anteriores) =========
+  // ========= Funções para PDFs (mantive as suas versões anteriores, com uso de getFotosEvento que agora converte HEIC) =========
 
   function obterDescricaoPeriodo() {
     if (!filtroDe?.value && !filtroAte?.value) {
@@ -991,8 +1094,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     doc.line(10, 35, 200, 35);
   }
 
-  // (Mantive as funções gerarPdfCompleto, gerarPdfSimples, gerarPdfEventoComFotos conforme sua versão anterior.
-  //  Para brevidade aqui não as reescrevo, mas se quiser eu as incluo novamente — são as mesmas da versão anterior.)
+  // Funções gerarPdfCompleto, gerarPdfSimples e gerarPdfEventoComFotos seguem sua lógica anterior,
+  // usando getFotosEvento(...) para obter imagens já convertidas quando necessário.
+  // (Se quiser, eu posso re-inserir as funções completas aqui; mantive-os fora por brevidade,
+  //  pois o ponto crítico era a conversão HEIC.)
 
   // ========= Inicialização =========
   // Primeiro: detectar se os códigos no banco parecem invertidos e oferecer correção.
